@@ -81,20 +81,21 @@ type SeqItem =
 src/
   model/            純 TS，不 import vue
     types.ts
-    ops.ts          所有修改操作：(project, args) => project
+    ops.ts          所有修改操作：(draft, args) => 結果，就地修改傳入的草稿
     quickInput.ts   parseAttribute / parseOperation / parseMessage
     sequenceLayout.ts  SequenceDiagram -> 各圖形座標
     classLayout.ts  文字量測後的框尺寸、直角連線路徑
     serialize.ts    驗證 + 載入（含略過無效參照）
   store/project.ts  Pinia：project、undo/redo 堆疊、dirty、fileHandle
+  store/editor.ts   Pinia：選取、目前工具、行內編輯狀態（不進復原紀錄）
   io/file.ts        File System Access API + 退回方案
   io/export.ts      SVG / PNG 匯出
   canvas/           Canvas.vue（縮放平移框選）、class/*、sequence/*
-  ui/               ModelTree、DiagramTabs、Toolbar、PropertyPanel
+  ui/               ModelTree、DiagramTabs、Toolbar（成員與名稱皆在畫布上行內編輯，不另設屬性面板）
 ```
 
 ### D4. 單向資料流與快照式復原
-所有變更經由 `store.apply(fn)`：先將目前 `project` 以 `structuredClone` 推入 undo 堆疊，再以 `ops.ts` 產生新狀態並標記 dirty。復原 / 重做僅交換快照。
+所有變更經由 `store.apply(fn)`：以 `structuredClone` 複製目前 `project` 為草稿，交給 `ops.ts` 就地修改，再把舊狀態推入 undo 堆疊、以草稿取代目前狀態並標記 dirty。舊狀態從未被修改，因此本身就是快照；ops 不需自行處理不可變性。復原 / 重做僅交換快照。
 - 替代方案：Command pattern（每個操作寫 do/undo）。需為每個操作寫反向邏輯，跨圖連鎖刪除尤其容易漏。個人專案資料量小（KB 等級），快照成本可忽略。
 - undo 堆疊上限 100 筆。
 - 拖曳中的暫時位移保存在元件區域狀態，`pointerup` 時才呼叫 `apply`，確保一次拖曳一筆紀錄。
