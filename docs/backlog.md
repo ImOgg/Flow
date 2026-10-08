@@ -14,6 +14,14 @@
   - 建議：選取連線按 Shift+Delete 從模型刪除
 - **模型樹標出沒放在任何圖上的元素**（例如淡色顯示）
 
+## Mermaid 轉換（2026-10-08 許願）
+
+- **匯出 Mermaid**：把目前的類別圖／循序圖輸出成 `classDiagram`／`sequenceDiagram` 文字，複製後可直接貼進 Markdown
+- **貼上 Mermaid 匯入**：貼上 Mermaid 文字，解析後建立對應的模型元素與圖
+- 注意：Mermaid 不存版面座標，匯入時需自動排版；匯出會遺失手動調整的位置
+- 建議先做匯出（模型 → 文字，單向、簡單），匯入（要寫 parser）另外排
+- 與流程圖／架構圖一起規劃：流程圖對應 Mermaid `flowchart`，架構圖可用 `flowchart` + subgraph（或 `architecture-beta`）；轉換層設計成「每種圖一個轉換器」，之後新增圖種時順便補上
+
 ## 其他
 
 - README 註明用 Chrome / Edge 開啟；VS Code 內建瀏覽器無法取得寫入權限，存檔會失敗
