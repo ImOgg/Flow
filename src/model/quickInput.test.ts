@@ -54,6 +54,11 @@ describe('parseMessage', () => {
   it('自己對自己、空文字、中文', () => {
     expect(parseMessage('服務 -> 服務:')).toEqual({ from: '服務', to: '服務', text: '', type: 'sync' })
   })
+  it('照畫面標題寫生命線', () => {
+    expect(parseMessage('A: Class -> B: Class: hi')).toEqual({ from: 'A: Class', to: 'B: Class', text: 'hi', type: 'sync' })
+    expect(parseMessage(':Auth --> B: ok')).toEqual({ from: ':Auth', to: 'B', text: 'ok', type: 'return' })
+    expect(parseMessage('A: Class->B: Class:')).toEqual({ from: 'A: Class', to: 'B: Class', text: '', type: 'sync' })
+  })
   it.each(['Client login', 'A -> B', '-> B: x', 'A => B: x', 'A B -> C: x'])('失敗輸入 %j 回傳 null', (s) => {
     expect(parseMessage(s)).toBeNull()
   })

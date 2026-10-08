@@ -50,6 +50,10 @@
 - **WHEN** 使用者輸入 `Client -> AuthService: login(id)`
 - **THEN** 新增一則從 Client 到 AuthService、文字為 `login(id)` 的同步訊息
 
+#### Scenario: 照畫面標題指定生命線
+- **WHEN** 使用者輸入 `A: AuthService -> B: AuthService: login()`，且已有標題為 `A: AuthService` 與 `B: AuthService` 的生命線
+- **THEN** 訊息建立在這兩條生命線之間，不另外新增生命線
+
 #### Scenario: 自動建立生命線
 - **WHEN** 輸入中的生命線名稱 `DB` 尚不存在
 - **THEN** 系統先在最右側新增 `DB` 生命線再建立訊息

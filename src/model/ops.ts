@@ -181,13 +181,25 @@ export function deleteLifeline(p: Project, diagramId: Id, id: Id) {
   d.items = prune(d.items)
 }
 
-/** 依顯示名稱找生命線（未命名但綁定類別者以類別名比對），找不到就在最右側新增 */
-export function ensureLifeline(p: Project, diagramId: Id, name: string): Id {
+/**
+ * 依快速輸入的寫法找生命線，找不到就在最右側新增：
+ * `A` 比對名稱（未命名但綁定類別者以類別名比對）；`A: Class` / `:Class` 比對名稱加綁定的類別，
+ * 新增時若模型有該類別就綁定它
+ */
+export function ensureLifeline(p: Project, diagramId: Id, ref: string): Id {
   const d = getSequenceDiagram(p, diagramId)
-  const found = d.lifelines.find(
-    (l) => l.name === name || (!l.name && l.elementId && p.model.elements[l.elementId]?.name === name),
-  )
-  return found ? found.id : addLifeline(p, diagramId, name)
+  const clsName = (l: { elementId?: Id }) => (l.elementId ? p.model.elements[l.elementId]?.name : undefined)
+  const colon = ref.indexOf(':')
+  if (colon < 0) {
+    const found = d.lifelines.find((l) => l.name === ref || (!l.name && clsName(l) === ref))
+    return found ? found.id : addLifeline(p, diagramId, ref)
+  }
+  const name = ref.slice(0, colon).trim()
+  const cls = ref.slice(colon + 1).trim()
+  const found = d.lifelines.find((l) => l.name === name && clsName(l) === cls)
+  if (found) return found.id
+  const el = Object.values(p.model.elements).find((e) => e.name === cls)
+  return el ? addLifeline(p, diagramId, name, el.id) : addLifeline(p, diagramId, name || cls)
 }
 
 // ---------- 循序圖：訊息與片段 ----------

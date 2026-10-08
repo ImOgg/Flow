@@ -82,6 +82,10 @@ input {
   border: 1px solid #1a73e8;
   outline: none;
 }
+input::placeholder {
+  color: #aaa;
+  font-style: italic;
+}
 input.error {
   border-color: #d93025;
   background: #fce8e6;

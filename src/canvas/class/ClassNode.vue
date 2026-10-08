@@ -71,8 +71,9 @@ function stopEditing() {
 const placeholder = computed(() => {
   const e = editing.value
   if (e?.kind !== 'member') return ''
-  if (props.el.kind === 'enum') return 'VALUE'
-  return e.list === 'attributes' ? '- name: string' : '+ login(id: string): bool'
+  const example = props.el.kind === 'enum' ? 'ACTIVE' : e.list === 'attributes' ? '- name: string' : '+ login(id: string): bool'
+  const what = props.el.kind === 'enum' ? '列舉值' : e.list === 'attributes' ? '屬性' : '操作'
+  return `新增${what}，例：${example}（Enter 新增、Esc 結束）`
 })
 
 const editY = computed(() => {
@@ -80,7 +81,8 @@ const editY = computed(() => {
   if (!e) return 0
   if (e.kind === 'name') return props.box.headerH - LINE_H - PAD_Y - 3
   const sec = props.box.sections.find((s) => s.list === e.list)!
-  return e.index < 0 ? sec.y + sec.h - 2 : sec.y + PAD_Y + e.index * LINE_H - 3
+  // 新增時放在框的下方，不擋住既有內容
+  return e.index < 0 ? props.box.h + 6 : sec.y + PAD_Y + e.index * LINE_H - 3
 })
 </script>
 
@@ -135,9 +137,9 @@ const editY = computed(() => {
     <InlineInput
       v-else-if="editing?.kind === 'member'"
       :key="`${editing.list}${editing.index}`"
-      :x="2"
+      :x="editing.index < 0 ? 0 : 2"
       :y="editY"
-      :w="Math.max(box.w - 4, 220)"
+      :w="editing.index < 0 ? 340 : Math.max(box.w - 4, 220)"
       :initial="memberText(editing.list, editing.index)"
       :placeholder="placeholder"
       :keep-open="editing.index < 0"

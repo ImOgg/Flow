@@ -171,6 +171,18 @@ describe('循序圖', () => {
     expect(seq(p, sd).lifelines.at(-1)!.id).toBe(db)
   })
 
+  it('ensureLifeline 接受「名稱: 類別」寫法，新增時綁定既有類別', () => {
+    const { p, sd, user } = seqSetup()
+    const a = ops.addLifeline(p, sd, 'a', user)
+    const anon = ops.addLifeline(p, sd, '', user)
+    expect(ops.ensureLifeline(p, sd, 'a: User')).toBe(a)
+    expect(ops.ensureLifeline(p, sd, ':User')).toBe(anon)
+    const b = ops.ensureLifeline(p, sd, 'b: User')
+    expect(seq(p, sd).lifelines.find((l) => l.id === b)).toMatchObject({ name: 'b', elementId: user })
+    const c = ops.ensureLifeline(p, sd, 'c: Nope')
+    expect(seq(p, sd).lifelines.find((l) => l.id === c)).toEqual({ id: c, name: 'c' })
+  })
+
   it('插入、刪除、移動訊息', () => {
     const { p, sd, msg } = seqSetup()
     const m1 = msg('m1')

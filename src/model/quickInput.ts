@@ -4,7 +4,9 @@ import type { Attribute, Message, Operation, Visibility } from './types'
 const N = String.raw`[\p{L}\p{N}_]+`
 const ATTR = new RegExp(String.raw`^([+\-#~])?\s*(${N})\s*(?::\s*(.+))?$`, 'u')
 const OP = new RegExp(String.raw`^([+\-#~])?\s*(${N})\s*\(([^)]*)\)\s*(?::\s*(.+))?$`, 'u')
-const MSG = new RegExp(String.raw`^(${N})\s*(-->|->)\s*(${N})\s*:\s*(.*)$`, 'u')
+// 生命線可寫名稱 `A`、或照畫面標題寫 `A: Class` / `:Class`
+const REF = String.raw`(?:${N}\s*)?:\s*${N}|${N}`
+const MSG = new RegExp(String.raw`^(${REF})\s*(-->|->)\s*(${REF})\s*:\s*(.*)$`, 'u')
 
 /** `- name: string` */
 export function parseAttribute(text: string): Attribute | null {
@@ -25,7 +27,7 @@ export function parseOperation(text: string): Operation | null {
   }
 }
 
-/** `A -> B: text`（同步）或 `A --> B: text`（回傳）；生命線以名稱表示 */
+/** `A -> B: text`（同步）或 `A --> B: text`（回傳）；生命線以名稱或 `名稱: 類別` 表示 */
 export function parseMessage(
   text: string,
 ): { from: string; to: string; text: string; type: Message['type'] } | null {
