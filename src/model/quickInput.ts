@@ -36,6 +36,24 @@ export function parseMessage(
   return { from: m[1], to: m[3], type: m[2] === '-->' ? 'return' : 'sync', text: m[4].trim() }
 }
 
+const REF_ONLY = new RegExp(String.raw`^(?:${REF})$`, 'u')
+const NOTE = /^note\s+over\s+(.+)$/iu
+
+/**
+ * `note over A, B: text`（不分大小寫）。生命線寫法本身可含冒號，
+ * 因此以「從左邊起第一個能讓所有生命線寫法都合法的冒號」作為文字分隔
+ */
+export function parseNote(text: string): { over: string[]; text: string } | null {
+  const m = NOTE.exec(text.trim())
+  if (!m) return null
+  const body = m[1]
+  for (let i = body.indexOf(':'); i >= 0; i = body.indexOf(':', i + 1)) {
+    const over = body.slice(0, i).split(',').map((r) => r.trim())
+    if (over.every((r) => REF_ONLY.test(r))) return { over, text: body.slice(i + 1).trim() }
+  }
+  return null
+}
+
 export const formatAttribute = (a: Attribute) => `${a.visibility} ${a.name}${a.type ? `: ${a.type}` : ''}`
 
 export const formatOperation = (o: Operation) =>

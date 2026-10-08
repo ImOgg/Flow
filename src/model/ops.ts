@@ -12,6 +12,7 @@ import type {
   InsertPos,
   Message,
   Operation,
+  Point,
   Project,
   RelationKind,
   SeqItem,
@@ -21,7 +22,7 @@ import type {
 export const newId = (): Id => crypto.randomUUID()
 
 export function emptyProject(): Project {
-  return { version: 1, model: { elements: {}, relations: {} }, diagrams: [] }
+  return { version: 2, model: { elements: {}, relations: {} }, diagrams: [] }
 }
 
 const DEFAULT_NAMES: Record<ClassifierKind, string> = {
@@ -59,19 +60,19 @@ export function removeMember(p: Project, id: Id, list: MemberList, index: number
   getElement(p, id)[list].splice(index, 1)
 }
 
-/** 從模型刪除元素：連帶移除相連關係、所有類別圖的節點與邊，並解除生命線綁定 */
+/** 從模型刪除元素：連帶移除相連關係、所有類別圖上的節點（含 Note 連結、套件成員），並解除生命線綁定 */
 export function deleteElement(p: Project, id: Id) {
-  delete p.model.elements[id]
   for (const r of Object.values(p.model.relations)) {
     if (r.sourceId === id || r.targetId === id) deleteRelation(p, r.id)
   }
   for (const d of p.diagrams) {
     if (d.type === 'class') {
-      d.nodes = d.nodes.filter((n) => n.elementId !== id)
+      removeFromDiagram(p, d.id, [id])
     } else {
       for (const l of d.lifelines) if (l.elementId === id) delete l.elementId
     }
   }
+  delete p.model.elements[id]
 }
 
 // ---------- 關係 ----------
@@ -97,7 +98,7 @@ export function addDiagram(p: Project, type: Diagram['type'], name: string): Id 
   const id = newId()
   p.diagrams.push(
     type === 'class'
-      ? { id, type, name, nodes: [], edges: [] }
+      ? { id, type, name, nodes: [], edges: [], notes: [], packages: [] }
       : { id, type, name, lifelines: [], items: [] },
   )
   return id
@@ -126,25 +127,93 @@ export function addNode(p: Project, diagramId: Id, elementId: Id, x: number, y: 
   }
 }
 
-/** 只從這張圖移除（模型保留）；移除節點時連帶移除接在它上的邊 */
-export function removeFromDiagram(p: Project, diagramId: Id, elementIds: Id[], relationIds: Id[] = []) {
+/** 註解連結的選取 id */
+export const noteLinkId = (noteId: Id, elementId: Id) => `${noteId}>${elementId}`
+
+/**
+ * 只從這張圖移除（模型保留）。ids 可混合 elementId、relationId、noteId、packageId 與註解連結 id；
+ * 移除節點時連帶移除接在它上的邊、Note 連結與套件成員。刪除套件只移除框，成員留在原位
+ */
+export function removeFromDiagram(p: Project, diagramId: Id, ids: Id[]) {
   const d = getClassDiagram(p, diagramId)
-  const els = new Set(elementIds)
-  const rels = new Set(relationIds)
-  d.nodes = d.nodes.filter((n) => !els.has(n.elementId))
+  const del = new Set(ids)
+  d.nodes = d.nodes.filter((n) => !del.has(n.elementId))
   d.edges = d.edges.filter((e) => {
     const r = p.model.relations[e.relationId]
-    return !!r && !rels.has(e.relationId) && !els.has(r.sourceId) && !els.has(r.targetId)
+    return !!r && !del.has(e.relationId) && !del.has(r.sourceId) && !del.has(r.targetId)
   })
+  d.notes = d.notes.filter((n) => !del.has(n.id))
+  for (const n of d.notes) n.links = n.links.filter((el) => !del.has(el) && !del.has(noteLinkId(n.id, el)))
+  d.packages = d.packages.filter((k) => !del.has(k.id))
+  for (const k of d.packages) k.elementIds = k.elementIds.filter((el) => !del.has(el))
 }
 
-export function moveNodes(p: Project, diagramId: Id, elementIds: Id[], dx: number, dy: number) {
-  const ids = new Set(elementIds)
-  for (const n of getClassDiagram(p, diagramId).nodes) {
-    if (ids.has(n.elementId)) {
-      n.x += dx
-      n.y += dy
-    }
+/** 移動節點、Note、套件；ids 可混合。套件連同成員移動，成員同時被選取時只移動一次 */
+export function moveItems(p: Project, diagramId: Id, ids: Id[], dx: number, dy: number) {
+  const d = getClassDiagram(p, diagramId)
+  const sel = new Set(ids)
+  const nodeIds = new Set(ids)
+  for (const k of d.packages) {
+    if (!sel.has(k.id)) continue
+    k.x += dx
+    k.y += dy
+    for (const el of k.elementIds) nodeIds.add(el)
+  }
+  for (const n of [...d.nodes.filter((n) => nodeIds.has(n.elementId)), ...d.notes.filter((n) => sel.has(n.id))]) {
+    n.x += dx
+    n.y += dy
+  }
+}
+
+// ---------- 類別圖：連線轉折點 ----------
+
+export function setEdgeBends(p: Project, diagramId: Id, relationId: Id, bends: Point[]) {
+  const e = getClassDiagram(p, diagramId).edges.find((x) => x.relationId === relationId)
+  if (e) e.bends = bends
+}
+
+export function resetEdgeBends(p: Project, diagramId: Id, relationId: Id) {
+  const e = getClassDiagram(p, diagramId).edges.find((x) => x.relationId === relationId)
+  if (e) delete e.bends
+}
+
+// ---------- 類別圖：註解 ----------
+
+export function addNote(p: Project, diagramId: Id, x: number, y: number, text = ''): Id {
+  const id = newId()
+  getClassDiagram(p, diagramId).notes.push({ id, text, x, y, links: [] })
+  return id
+}
+
+export function setNoteText(p: Project, diagramId: Id, id: Id, text: string) {
+  const n = getClassDiagram(p, diagramId).notes.find((x) => x.id === id)
+  if (n) n.text = text
+}
+
+export function linkNote(p: Project, diagramId: Id, noteId: Id, elementId: Id) {
+  const d = getClassDiagram(p, diagramId)
+  const n = d.notes.find((x) => x.id === noteId)
+  if (n && !n.links.includes(elementId) && d.nodes.some((x) => x.elementId === elementId)) n.links.push(elementId)
+}
+
+// ---------- 類別圖：套件 ----------
+
+export function addPackage(p: Project, diagramId: Id, x: number, y: number, name = 'Package'): Id {
+  const id = newId()
+  getClassDiagram(p, diagramId).packages.push({ id, name, x, y, elementIds: [] })
+  return id
+}
+
+export function renamePackage(p: Project, diagramId: Id, id: Id, name: string) {
+  const k = getClassDiagram(p, diagramId).packages.find((x) => x.id === id)
+  if (k) k.name = name
+}
+
+/** 讓元素只屬於 packageId（null = 離開所有套件） */
+export function setPackageMembership(p: Project, diagramId: Id, elementId: Id, packageId: Id | null) {
+  for (const k of getClassDiagram(p, diagramId).packages) {
+    k.elementIds = k.elementIds.filter((el) => el !== elementId)
+    if (k.id === packageId) k.elementIds.push(elementId)
   }
 }
 
@@ -168,13 +237,17 @@ export function moveLifeline(p: Project, diagramId: Id, id: Id, toIndex: number)
   d.lifelines.splice(Math.max(0, Math.min(toIndex, d.lifelines.length)), 0, l)
 }
 
-/** 刪除生命線，並刪除所有以它為發送或接收端的訊息 */
+/** 刪除生命線，並刪除所有以它為發送或接收端的訊息；Note 不再覆蓋它，覆蓋全空的 Note 一併刪除 */
 export function deleteLifeline(p: Project, diagramId: Id, id: Id) {
   const d = getSequenceDiagram(p, diagramId)
   d.lifelines = d.lifelines.filter((l) => l.id !== id)
   const prune = (items: SeqItem[]): SeqItem[] =>
     items.filter((it) => {
       if (it.kind === 'message') return it.from !== id && it.to !== id
+      if (it.kind === 'note') {
+        it.over = it.over.filter((l) => l !== id)
+        return it.over.length > 0
+      }
       for (const o of it.operands) o.items = prune(o.items)
       return true
     })
@@ -209,6 +282,18 @@ export function insertMessage(p: Project, diagramId: Id, msg: Omit<Message, 'kin
   const id = newId()
   insertAt(d, { kind: 'message', id, ...msg }, pos ?? { container: null, index: d.items.length })
   return id
+}
+
+export function insertNote(p: Project, diagramId: Id, over: Id[], text: string, pos?: InsertPos): Id {
+  const d = getSequenceDiagram(p, diagramId)
+  const id = newId()
+  insertAt(d, { kind: 'note', id, text, over }, pos ?? { container: null, index: d.items.length })
+  return id
+}
+
+export function setSeqNoteText(p: Project, diagramId: Id, id: Id, text: string) {
+  const hit = findItem(getSequenceDiagram(p, diagramId).items, id)
+  if (hit?.item.kind === 'note') hit.item.text = text
 }
 
 export function updateMessage(p: Project, diagramId: Id, id: Id, patch: Partial<Omit<Message, 'kind' | 'id'>>) {

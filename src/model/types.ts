@@ -48,12 +48,43 @@ export interface ClassNode {
   y: number
 }
 
+export interface Point {
+  x: number
+  y: number
+}
+
+export interface ClassEdge {
+  relationId: Id
+  /** 中間的轉折點；省略 = 自動路徑 */
+  bends?: Point[]
+}
+
+/** 類別圖上的註解；links 為連結的 elementId */
+export interface ClassNote {
+  id: Id
+  text: string
+  x: number
+  y: number
+  links: Id[]
+}
+
+/** 類別圖上的套件框：只屬於該圖，不進模型 */
+export interface Package {
+  id: Id
+  name: string
+  x: number
+  y: number
+  elementIds: Id[]
+}
+
 export interface ClassDiagram {
   id: Id
   type: 'class'
   name: string
   nodes: ClassNode[]
-  edges: { relationId: Id }[]
+  edges: ClassEdge[]
+  notes: ClassNote[]
+  packages: Package[]
 }
 
 export interface Lifeline {
@@ -85,7 +116,15 @@ export interface Fragment {
   operands: Operand[]
 }
 
-export type SeqItem = Message | Fragment
+/** 循序圖註解：依順序佔一列，over 為覆蓋的 lifelineId */
+export interface SeqNote {
+  kind: 'note'
+  id: Id
+  text: string
+  over: Id[]
+}
+
+export type SeqItem = Message | Fragment | SeqNote
 
 export interface SequenceDiagram {
   id: Id
@@ -100,7 +139,7 @@ export interface SequenceDiagram {
 export type Diagram = ClassDiagram | SequenceDiagram
 
 export interface Project {
-  version: 1
+  version: 2
   model: {
     elements: Record<Id, Classifier>
     relations: Record<Id, Relation>

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Point, Rect } from '../../model/classLayout'
 import * as ops from '../../model/ops'
-import { parseMessage } from '../../model/quickInput'
+import { parseMessage, parseNote } from '../../model/quickInput'
 import { layoutSequence, SEQ, type FragmentBox, type MessageBox, type Slot } from '../../model/sequenceLayout'
 import type { FragmentType, Id, InsertPos, SequenceDiagram } from '../../model/types'
 import { exportPng, exportSvg } from '../../io/export'
@@ -12,6 +12,7 @@ import Canvas from '../Canvas.vue'
 import InlineInput from '../InlineInput.vue'
 import Markers from '../Markers.vue'
 import { measureText } from '../measure'
+import NoteShape from '../NoteShape.vue'
 import { isTyping, trackPointer } from '../pointer'
 
 const props = defineProps<{ diagram: SequenceDiagram }>()
@@ -53,7 +54,7 @@ function onHeadDown(e: PointerEvent, id: Id) {
   )
 }
 
-// ---------- 訊息：選取、垂直拖曳重排 ----------
+// ---------- 訊息與 Note：選取、垂直拖曳重排 ----------
 const msgDrag = ref<{ id: Id; y: number } | null>(null)
 
 function onMessageDown(e: PointerEvent, id: Id) {
@@ -188,17 +189,27 @@ function insertPos(): InsertPos | undefined {
 
 const quick = ref('')
 const quickError = ref(false)
+/** 先試 Note 語法再試訊息語法；不存在的生命線自動在最右側新增 */
 function submitQuick() {
-  const m = parseMessage(quick.value)
-  if (!m) {
+  const n = parseNote(quick.value)
+  const m = n ? null : parseMessage(quick.value)
+  if (!n && !m) {
     quickError.value = true
     return
   }
   const pos = insertPos()
   const id = store.apply((p) => {
-    const from = ops.ensureLifeline(p, dId(), m.from)
-    const to = ops.ensureLifeline(p, dId(), m.to)
-    return ops.insertMessage(p, dId(), { from, to, text: m.text, type: m.type }, pos)
+    if (n) {
+      const over = [...new Set(n.over.map((r) => ops.ensureLifeline(p, dId(), r)))]
+      return ops.insertNote(p, dId(), over, n.text, pos)
+    }
+    const { from, to, text, type } = m!
+    return ops.insertMessage(
+      p,
+      dId(),
+      { from: ops.ensureLifeline(p, dId(), from), to: ops.ensureLifeline(p, dId(), to), text, type },
+      pos,
+    )
   })
   ed.select(id) // 下一則接在這則之後
   quick.value = ''
@@ -220,6 +231,7 @@ function onMarquee(r: Rect, additive: boolean) {
     Math.min(x1, x2) >= r.x && Math.max(x1, x2) <= r.x + r.w && y1 >= r.y && y2 <= r.y + r.h
   const ids = [
     ...L.value.messages.filter((m) => inside(m.x1, m.self ? m.x1 + 30 : m.x2, m.y, m.self ? m.y + SELF_H : m.y)).map((m) => m.id),
+    ...L.value.notes.filter((n) => inside(n.x, n.x + n.w, n.y, n.y + n.h)).map((n) => n.id),
     ...L.value.lifelines.filter((l) => inside(l.cx - l.headW / 2, l.cx + l.headW / 2, HEAD_TOP, HEAD_TOP + HEAD_H)).map((l) => l.id),
   ]
   ed.selection = additive ? [...new Set([...ed.selection, ...ids])] : ids
@@ -252,7 +264,7 @@ onBeforeUnmount(() => {
 // ---------- 行內編輯 ----------
 const editing = computed(() => {
   const e = ed.editing
-  return e && (e.kind === 'lifeline' || e.kind === 'message' || e.kind === 'guard') ? e : null
+  return e && (e.kind === 'lifeline' || e.kind === 'message' || e.kind === 'guard' || e.kind === 'note') ? e : null
 })
 const stopEditing = () => (ed.editing = null)
 
@@ -267,9 +279,27 @@ function toggleMessageType() {
   if (m) store.apply((p) => ops.updateMessage(p, dId(), m.id, { type: m.type === 'sync' ? 'return' : 'sync' }))
 }
 
-const editBox = computed((): (Point & { w: number; initial: string; submit: (t: string) => boolean }) | null => {
+type EditBox = Point & { w: number; initial: string; multiline?: boolean; submit: (t: string) => boolean }
+const editBox = computed((): EditBox | null => {
   const e = editing.value
   if (!e) return null
+  if (e.kind === 'note') {
+    const n = L.value.notes.find((x) => x.id === e.id)
+    const hit = ops.findItem(props.diagram.items, e.id)
+    if (!n || hit?.item.kind !== 'note') return null
+    const initial = hit.item.text
+    return {
+      x: n.x,
+      y: n.y,
+      w: Math.max(n.w, 200),
+      initial,
+      multiline: true,
+      submit: (t) => {
+        if (t.trim() !== initial) store.apply((p) => ops.setSeqNoteText(p, dId(), e.id, t.trim()))
+        return true
+      },
+    }
+  }
   if (e.kind === 'lifeline') {
     const i = props.diagram.lifelines.findIndex((l) => l.id === e.id)
     if (i < 0) return null
@@ -326,8 +356,9 @@ function doExport(type: 'svg' | 'png') {
   ;(type === 'svg' ? exportSvg : exportPng)(content, { x: 0, y: 0, w: L.value.width, h: L.value.height }, props.diagram.name)
 }
 
+// 自迴圈回到 x2（巢狀執行區段的邊緣）
 const messagePath = (m: MessageBox) =>
-  m.self ? `M${m.x1},${m.y} h30 v${SELF_H} h-30` : `M${m.x1},${m.y} L${m.x2},${m.y}`
+  m.self ? `M${m.x1},${m.y} h30 v${SELF_H} H${m.x2}` : `M${m.x1},${m.y} L${m.x2},${m.y}`
 const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag.value.dx : 0)
 </script>
 
@@ -339,7 +370,7 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
         v-model="quick"
         class="quick"
         :class="{ error: quickError }"
-        placeholder="A -> B: login()　或　B --> A: ok　（Enter 新增）"
+        placeholder="A -> B: login()　或　B --> A: ok　或　note over A, B: 說明　（Enter 新增）"
         @input="quickError = false"
         @keydown.enter="submitQuick"
       />
@@ -357,7 +388,7 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
       <button :disabled="isEmpty" @click="doExport('png')">匯出 PNG</button>
     </div>
     <div class="hint">
-      從生命線虛線拖到另一條生命線建立訊息（按住 Alt 為回傳）；輸入框打字也可以，新訊息插入在選取的訊息之後（點片段區段則加到該區段末尾）；雙擊可編輯文字；拖曳訊息上下重排、拖曳生命線標題左右重排；Delete 刪除（片段為解除）
+      從生命線虛線拖到另一條生命線建立訊息（按住 Alt 為回傳）；輸入框打字也可以，新訊息插入在選取的訊息之後（點片段區段則加到該區段末尾）；輸入 note over A, B: 文字 新增註解；雙擊可編輯文字（註解 Shift+Enter 換行）；拖曳訊息 / 註解上下重排、拖曳生命線標題左右重排；Delete 刪除（片段為解除）
     </div>
     <div class="drop" @dragover.prevent @drop.prevent="onDrop">
       <Canvas ref="canvas" @background-click="ed.clear()" @marquee="onMarquee">
@@ -435,6 +466,18 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
             />
           </template>
         </g>
+        <!-- 執行區段：不攔截指標，讓下方的生命線熱區仍可拖出訊息 -->
+        <rect
+          v-for="(a, i) in L.activations"
+          :key="`act-${i}`"
+          :x="a.x"
+          :y="a.y1"
+          :width="SEQ.ACT_W"
+          :height="a.y2 - a.y1"
+          fill="#fff"
+          stroke="#333"
+          pointer-events="none"
+        />
         <!-- 生命線拖拉熱區：從這裡拖出新訊息 -->
         <line
           v-for="l in L.lifelines"
@@ -499,6 +542,19 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
             {{ m.text }}
           </text>
         </g>
+        <!-- Note -->
+        <NoteShape
+          v-for="n in L.notes"
+          :key="n.id"
+          :x="n.x"
+          :y="n.y"
+          :w="n.w"
+          :h="n.h"
+          :lines="n.lines"
+          :selected="isSelected(n.id)"
+          @down="onMessageDown($event, n.id)"
+          @edit="ed.editing = { kind: 'note', id: n.id }"
+        />
         <!-- 拖拉建立訊息的預覽 -->
         <g v-if="createPreview" pointer-events="none" data-export="false">
           <path
@@ -538,6 +594,7 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
           :y="editBox.y"
           :w="editBox.w"
           :initial="editBox.initial"
+          :multiline="editBox.multiline"
           :submit="editBox.submit"
           @close="stopEditing"
         />
