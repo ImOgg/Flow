@@ -63,6 +63,10 @@ const center = (r: Rect): Point => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })
 const nodeAt = (p: Point) =>
   [...rects.value].reverse().find(([, r]) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h)?.[0]
 
+/** 選取中、或正在拉關係的來源 / 游標下的目標，都用選取框標示 */
+const highlighted = (id: Id) =>
+  ed.selection.includes(id) || (!!linking.value && (linking.value.sourceId === id || nodeAt(linking.value.to) === id))
+
 function bounds(): Rect | null {
   const pts = [...rects.value.values()].flatMap((r) => [
     { x: r.x, y: r.y },
@@ -205,7 +209,7 @@ const isEmpty = computed(() => !props.diagram.nodes.length)
       <template v-else-if="isRelationTool(ed.tool)">從來源拖曳到目標（聚合 / 組合：從整體拖到部分）</template>
       <template v-else>雙擊名稱改名、雙擊區塊新增成員（例：- name: string、+ login(id: string): bool）；Delete 從圖移除</template>
     </div>
-    <div class="drop" @dragover.prevent @drop.prevent="onDrop">
+    <div class="drop" :class="{ linking: isRelationTool(ed.tool) }" @dragover.prevent @drop.prevent="onDrop">
       <Canvas ref="canvas" @background-click="onBackgroundClick" @marquee="onMarquee">
         <Markers />
         <RelationEdge
@@ -223,7 +227,7 @@ const isEmpty = computed(() => !props.diagram.nodes.length)
           :box="n.box"
           :x="n.x"
           :y="n.y"
-          :selected="ed.selection.includes(n.el.id)"
+          :selected="highlighted(n.el.id)"
           @down="onNodeDown($event, n.el.id)"
         />
         <line
@@ -241,3 +245,9 @@ const isEmpty = computed(() => !props.diagram.nodes.length)
     </div>
   </div>
 </template>
+
+<style scoped>
+.linking {
+  cursor: crosshair;
+}
+</style>

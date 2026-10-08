@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Point, Rect } from '../../model/classLayout'
 import * as ops from '../../model/ops'
 import { parseMessage } from '../../model/quickInput'
-import { layoutSequence, SEQ, type FragmentBox, type MessageBox } from '../../model/sequenceLayout'
+import { layoutSequence, SEQ, type FragmentBox, type MessageBox, type Slot } from '../../model/sequenceLayout'
 import type { FragmentType, Id, InsertPos, SequenceDiagram } from '../../model/types'
 import { exportPng, exportSvg } from '../../io/export'
 import { useEditorStore } from '../../store/editor'
@@ -68,19 +68,16 @@ function onMessageDown(e: PointerEvent, id: Id) {
       const d = msgDrag.value
       msgDrag.value = null
       if (!d || Math.abs(d.y - startY) < 5) return
-      const pos = nearestSlot(d.y)
+      const pos = nearestSlot(d.y)?.pos
       if (pos && !isSamePlace(id, pos)) store.apply((p) => ops.moveItem(p, dId(), id, pos))
     },
   )
 }
 
-function nearestSlot(y: number): InsertPos | null {
-  let best: { d: number; pos: InsertPos } | null = null
-  for (const s of L.value.slots) {
-    const d = Math.abs(s.y - y)
-    if (!best || d < best.d) best = { d, pos: s.pos }
-  }
-  return best?.pos ?? null
+function nearestSlot(y: number): Slot | null {
+  let best: Slot | null = null
+  for (const s of L.value.slots) if (!best || Math.abs(s.y - y) < Math.abs(best.y - y)) best = s
+  return best
 }
 
 function isSamePlace(id: Id, pos: InsertPos) {
@@ -88,6 +85,42 @@ function isSamePlace(id: Id, pos: InsertPos) {
   const same = hit?.container?.fragmentId === pos.container?.fragmentId && hit?.container?.operand === pos.container?.operand
   return !!hit && same && (pos.index === hit.index || pos.index === hit.index + 1)
 }
+
+// ---------- 拖拉建立訊息 ----------
+const creating = ref<{ fromId: Id; x1: number; to: Point } | null>(null)
+
+/** 從生命線虛線拖到另一條生命線：依放開的高度插入，按住 Alt 為回傳訊息 */
+function onLifelineDown(e: PointerEvent, id: Id, cx: number) {
+  if (e.button !== 0) return
+  e.stopPropagation()
+  const start = world(e)
+  creating.value = { fromId: id, x1: cx, to: start }
+  trackPointer(
+    e,
+    (m) => (creating.value = { fromId: id, x1: cx, to: world(m) }),
+    (u) => {
+      creating.value = null
+      const end = world(u)
+      if (Math.hypot(end.x - start.x, end.y - start.y) < 5) return ed.select(id)
+      const to = props.diagram.lifelines[lifelineIndexAt(end.x)].id
+      const pos = nearestSlot(end.y)?.pos
+      const type = u.altKey ? 'return' : 'sync'
+      const mid = store.apply((p) => ops.insertMessage(p, dId(), { from: id, to, text: '', type }, pos))
+      ed.select(mid)
+      ed.editing = { kind: 'message', id: mid }
+    },
+  )
+}
+
+const createPreview = computed(() => {
+  const c = creating.value
+  if (!c) return null
+  const target = L.value.lifelines[lifelineIndexAt(c.to.x)]
+  return { x1: c.x1, x2: target.cx, y: c.to.y, self: target.id === c.fromId, slotY: nearestSlot(c.to.y)?.y }
+})
+
+// Windows 上單獨放開 Alt 會讓瀏覽器選單搶走焦點，害剛出現的輸入框關掉
+const onAltUp = (e: KeyboardEvent) => e.key === 'Alt' && e.preventDefault()
 
 // ---------- 片段 ----------
 const labelW = (f: FragmentBox) => measureText(f.type, true) + 16
@@ -207,8 +240,14 @@ function onKeyDown(e: KeyboardEvent) {
     ed.clear()
   }
 }
-onMounted(() => window.addEventListener('keydown', onKeyDown))
-onBeforeUnmount(() => window.removeEventListener('keydown', onKeyDown))
+onMounted(() => {
+  window.addEventListener('keydown', onKeyDown)
+  window.addEventListener('keyup', onAltUp)
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeyDown)
+  window.removeEventListener('keyup', onAltUp)
+})
 
 // ---------- 行內編輯 ----------
 const editing = computed(() => {
@@ -216,6 +255,17 @@ const editing = computed(() => {
   return e && (e.kind === 'lifeline' || e.kind === 'message' || e.kind === 'guard') ? e : null
 })
 const stopEditing = () => (ed.editing = null)
+
+const editingMessage = computed(() => {
+  const e = editing.value
+  const hit = e?.kind === 'message' ? ops.findItem(props.diagram.items, e.id) : null
+  return hit?.item.kind === 'message' ? hit.item : null
+})
+
+function toggleMessageType() {
+  const m = editingMessage.value
+  if (m) store.apply((p) => ops.updateMessage(p, dId(), m.id, { type: m.type === 'sync' ? 'return' : 'sync' }))
+}
 
 const editBox = computed((): (Point & { w: number; initial: string; submit: (t: string) => boolean }) | null => {
   const e = editing.value
@@ -307,7 +357,7 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
       <button :disabled="isEmpty" @click="doExport('png')">匯出 PNG</button>
     </div>
     <div class="hint">
-      新訊息插入在選取的訊息之後（點片段區段則加到該區段末尾）；雙擊可編輯文字；拖曳訊息上下重排、拖曳生命線標題左右重排；Delete 刪除（片段為解除）
+      從生命線虛線拖到另一條生命線建立訊息（按住 Alt 為回傳）；輸入框打字也可以，新訊息插入在選取的訊息之後（點片段區段則加到該區段末尾）；雙擊可編輯文字；拖曳訊息上下重排、拖曳生命線標題左右重排；Delete 刪除（片段為解除）
     </div>
     <div class="drop" @dragover.prevent @drop.prevent="onDrop">
       <Canvas ref="canvas" @background-click="ed.clear()" @marquee="onMarquee">
@@ -385,6 +435,20 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
             />
           </template>
         </g>
+        <!-- 生命線拖拉熱區：從這裡拖出新訊息 -->
+        <line
+          v-for="l in L.lifelines"
+          :key="`hit-${l.id}`"
+          :x1="l.cx"
+          :x2="l.cx"
+          :y1="L.lineTop"
+          :y2="L.lineBottom"
+          stroke="transparent"
+          stroke-width="14"
+          class="lifeline-hit"
+          data-export="false"
+          @pointerdown="onLifelineDown($event, l.id, l.cx)"
+        />
         <!-- 生命線標題 -->
         <g
           v-for="l in L.lifelines"
@@ -435,13 +499,33 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
             {{ m.text }}
           </text>
         </g>
+        <!-- 拖拉建立訊息的預覽 -->
+        <g v-if="createPreview" pointer-events="none" data-export="false">
+          <path
+            :d="createPreview.self
+              ? `M${createPreview.x1},${createPreview.y} h30 v${SELF_H} h-30`
+              : `M${createPreview.x1},${createPreview.y} L${createPreview.x2},${createPreview.y}`"
+            fill="none"
+            stroke="#1a73e8"
+            marker-end="url(#m-filled)"
+          />
+          <line
+            v-if="createPreview.slotY !== undefined"
+            :x1="MARGIN"
+            :x2="L.width - MARGIN"
+            :y1="createPreview.slotY"
+            :y2="createPreview.slotY"
+            stroke="#1a73e8"
+            stroke-dasharray="4 3"
+          />
+        </g>
         <!-- 拖曳中的訊息落點提示 -->
         <line
-          v-if="msgDrag"
+          v-if="msgDrag && nearestSlot(msgDrag.y)"
           :x1="MARGIN"
           :x2="L.width - MARGIN"
-          :y1="msgDrag.y"
-          :y2="msgDrag.y"
+          :y1="nearestSlot(msgDrag.y)!.y"
+          :y2="nearestSlot(msgDrag.y)!.y"
           stroke="#1a73e8"
           stroke-dasharray="4 3"
           pointer-events="none"
@@ -457,6 +541,19 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
           :submit="editBox.submit"
           @close="stopEditing"
         />
+        <foreignObject
+          v-if="editingMessage && editBox"
+          :x="editBox.x + editBox.w + 4"
+          :y="editBox.y"
+          width="90"
+          height="24"
+          data-export="false"
+        >
+          <!-- mousedown.prevent：不讓輸入框失焦關閉 -->
+          <button class="type-toggle" @mousedown.prevent @pointerdown.stop @click="toggleMessageType">
+            {{ editingMessage.type === 'sync' ? '改為回傳' : '改為同步' }}
+          </button>
+        </foreignObject>
       </Canvas>
     </div>
   </div>
@@ -467,6 +564,14 @@ const headX = (id: Id, cx: number) => cx + (headDrag.value?.id === id ? headDrag
   width: 320px;
   font: inherit;
   padding: 2px 6px;
+}
+.lifeline-hit {
+  cursor: crosshair;
+}
+.type-toggle {
+  height: 22px;
+  padding: 0 6px;
+  white-space: nowrap;
 }
 .quick.error {
   border-color: #d93025;
