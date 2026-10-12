@@ -18,7 +18,7 @@ const cls = (p: Project, id: string) => ops.getClassDiagram(p, id)
 const shape = (items: SeqItem[]): string =>
   items
     .map((it) =>
-      it.kind === 'message' ? it.text : `${it.type}(${it.operands.map((o) => shape(o.items)).join('|')})`,
+      it.kind === 'message' ? it.text : it.kind === 'note' ? `note(${it.text})` : `${it.type}(${it.operands.map((o) => shape(o.items)).join('|')})`,
     )
     .join(' ')
 
@@ -121,7 +121,7 @@ describe('圖操作', () => {
     ops.addNode(p, cd1, user, 0, 0)
     ops.addNode(p, cd1, order, 200, 0)
     const rel = ops.addRelation(p, 'association', order, user, cd1)
-    ops.removeFromDiagram(p, cd1, [], [rel])
+    ops.removeFromDiagram(p, cd1, [rel])
     expect(cls(p, cd1).edges).toEqual([])
     expect(cls(p, cd1).nodes).toHaveLength(2)
   })
@@ -130,10 +130,126 @@ describe('圖操作', () => {
     const { p, user, order, cd1 } = setup()
     ops.addNode(p, cd1, user, 0, 0)
     ops.addNode(p, cd1, order, 100, 50)
-    ops.moveNodes(p, cd1, [user, order], 10, -5)
+    ops.moveItems(p, cd1, [user, order], 10, -5)
     expect(cls(p, cd1).nodes.map((n) => [n.x, n.y])).toEqual([[10, -5], [110, 45]])
     ops.renameDiagram(p, cd1, 'X')
     expect(cls(p, cd1).name).toBe('X')
+  })
+})
+
+describe('類別圖 Note', () => {
+  function withNote() {
+    const s = setup()
+    for (const d of [s.cd1, s.cd2]) {
+      ops.addNode(s.p, d, s.user, 0, 0)
+      ops.addNode(s.p, d, s.order, 200, 0)
+    }
+    const n1 = ops.addNote(s.p, s.cd1, 0, 200)
+    const n2 = ops.addNote(s.p, s.cd2, 0, 200)
+    for (const [d, n] of [[s.cd1, n1], [s.cd2, n2]]) {
+      ops.linkNote(s.p, d, n, s.user)
+      ops.linkNote(s.p, d, n, s.order)
+      ops.linkNote(s.p, d, n, s.user) // 重複連結不重複記錄
+    }
+    return { ...s, n1, n2 }
+  }
+
+  it('新增、改文字、連結；不能連到圖上沒有的元素', () => {
+    const { p, cd1, n1, user, order } = withNote()
+    ops.setNoteText(p, cd1, n1, 'a')
+    ops.linkNote(p, cd1, n1, 'ghost')
+    expect(cls(p, cd1).notes).toEqual([{ id: n1, text: 'a', x: 0, y: 200, links: [user, order] }])
+  })
+
+  it('取消連結與刪除 Note', () => {
+    const { p, cd1, n1, user, order } = withNote()
+    ops.removeFromDiagram(p, cd1, [ops.noteLinkId(n1, user)])
+    expect(cls(p, cd1).notes[0].links).toEqual([order])
+    expect(cls(p, cd1).nodes).toHaveLength(2)
+    ops.removeFromDiagram(p, cd1, [n1])
+    expect(cls(p, cd1).notes).toEqual([])
+  })
+
+  it('連結的元素從圖移除後連結消失、Note 保留', () => {
+    const { p, cd1, cd2, user, order } = withNote()
+    ops.removeFromDiagram(p, cd1, [user])
+    expect(cls(p, cd1).notes[0].links).toEqual([order])
+    expect(cls(p, cd2).notes[0].links).toEqual([user, order])
+  })
+
+  it('從模型刪除元素後所有圖的連結消失', () => {
+    const { p, cd1, cd2, user, order } = withNote()
+    ops.deleteElement(p, user)
+    for (const d of [cd1, cd2]) expect(cls(p, d).notes[0].links).toEqual([order])
+  })
+
+  it('Class 與 Note 一起移動', () => {
+    const { p, cd1, n1, user } = withNote()
+    ops.moveItems(p, cd1, [user, n1], 5, 7)
+    expect(cls(p, cd1).nodes.map((n) => [n.x, n.y])).toEqual([[5, 7], [200, 0]])
+    expect(cls(p, cd1).notes.map((n) => [n.x, n.y])).toEqual([[5, 207]])
+  })
+})
+
+describe('類別圖套件', () => {
+  function withPackage() {
+    const s = setup()
+    ops.addNode(s.p, s.cd1, s.user, 0, 0)
+    ops.addNode(s.p, s.cd1, s.order, 200, 0)
+    const k1 = ops.addPackage(s.p, s.cd1, -20, -40)
+    const k2 = ops.addPackage(s.p, s.cd1, 500, 0)
+    ops.setPackageMembership(s.p, s.cd1, s.user, k1)
+    return { ...s, k1, k2 }
+  }
+  const members = (p: Project, d: string) => cls(p, d).packages.map((k) => k.elementIds)
+
+  it('新增與改名', () => {
+    const { p, cd1, k1 } = withPackage()
+    ops.renamePackage(p, cd1, k1, 'auth')
+    expect(cls(p, cd1).packages[0]).toMatchObject({ id: k1, name: 'auth', x: -20, y: -40 })
+  })
+
+  it('一個元素只屬一個套件；null 離開', () => {
+    const { p, cd1, k2, user } = withPackage()
+    ops.setPackageMembership(p, cd1, user, k2)
+    expect(members(p, cd1)).toEqual([[], [user]])
+    ops.setPackageMembership(p, cd1, user, null)
+    expect(members(p, cd1)).toEqual([[], []])
+  })
+
+  it('移動套件連同成員；成員同時被選取時只移動一次', () => {
+    const { p, cd1, k1, user, order } = withPackage()
+    ops.moveItems(p, cd1, [k1, user], 100, 0)
+    expect(cls(p, cd1).nodes.map((n) => n.x)).toEqual([100, 200])
+    expect(cls(p, cd1).packages[0].x).toBe(80)
+    ops.moveItems(p, cd1, [k1, order], 10, 0)
+    expect(cls(p, cd1).nodes.map((n) => n.x)).toEqual([110, 210])
+  })
+
+  it('成員從圖移除後離開套件', () => {
+    const { p, cd1, user } = withPackage()
+    ops.removeFromDiagram(p, cd1, [user])
+    expect(members(p, cd1)).toEqual([[], []])
+  })
+
+  it('刪除套件保留成員', () => {
+    const { p, cd1, k1 } = withPackage()
+    ops.removeFromDiagram(p, cd1, [k1])
+    expect(cls(p, cd1).packages).toHaveLength(1)
+    expect(cls(p, cd1).nodes.map((n) => [n.x, n.y])).toEqual([[0, 0], [200, 0]])
+  })
+})
+
+describe('連線轉折點', () => {
+  it('設定與重設', () => {
+    const { p, user, order, cd1 } = setup()
+    ops.addNode(p, cd1, user, 0, 0)
+    ops.addNode(p, cd1, order, 200, 0)
+    const rel = ops.addRelation(p, 'association', order, user, cd1)
+    ops.setEdgeBends(p, cd1, rel, [{ x: 1, y: 2 }])
+    expect(cls(p, cd1).edges).toEqual([{ relationId: rel, bends: [{ x: 1, y: 2 }] }])
+    ops.resetEdgeBends(p, cd1, rel)
+    expect(cls(p, cd1).edges).toEqual([{ relationId: rel }])
   })
 })
 
@@ -160,6 +276,30 @@ describe('循序圖', () => {
     ops.deleteLifeline(p, sd, b)
     expect(shape(seq(p, sd).items)).toBe('loop() self')
     expect(seq(p, sd).lifelines.map((l) => l.id)).toEqual([c, a])
+  })
+
+  it('Note 插入、改文字、重排、刪除', () => {
+    const { p, sd, a, b, msg } = seqSetup()
+    const m1 = msg('m1')
+    const n = ops.insertNote(p, sd, [a, b], 'n', ops.posAfter(seq(p, sd), m1)!)
+    msg('m2')
+    ops.setSeqNoteText(p, sd, n, 'x')
+    expect(shape(seq(p, sd).items)).toBe('m1 note(x) m2')
+    ops.moveItem(p, sd, n, { container: null, index: 0 })
+    expect(shape(seq(p, sd).items)).toBe('note(x) m1 m2')
+    ops.deleteItem(p, sd, n)
+    expect(shape(seq(p, sd).items)).toBe('m1 m2')
+  })
+
+  it('刪除覆蓋的生命線：只剩其餘生命線；全部刪除則 Note 刪除', () => {
+    const { p, sd, a, b } = seqSetup()
+    const m = ops.insertNote(p, sd, [a], 'only-a')
+    ops.wrapInFragment(p, sd, [m], 'opt')
+    ops.insertNote(p, sd, [a, b], 'ab')
+    ops.deleteLifeline(p, sd, b)
+    expect(seq(p, sd).items.at(-1)).toMatchObject({ kind: 'note', over: [a] })
+    ops.deleteLifeline(p, sd, a)
+    expect(shape(seq(p, sd).items)).toBe('opt()')
   })
 
   it('ensureLifeline 依名稱或綁定類別名比對，找不到則新增', () => {

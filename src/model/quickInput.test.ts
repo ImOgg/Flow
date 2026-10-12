@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatAttribute, formatOperation, parseAttribute, parseMessage, parseOperation } from './quickInput'
+import { formatAttribute, formatOperation, parseAttribute, parseMessage, parseNote, parseOperation } from './quickInput'
 
 describe('parseAttribute', () => {
   it('完整語法', () => {
@@ -61,6 +61,28 @@ describe('parseMessage', () => {
   })
   it.each(['Client login', 'A -> B', '-> B: x', 'A => B: x', 'A B -> C: x'])('失敗輸入 %j 回傳 null', (s) => {
     expect(parseMessage(s)).toBeNull()
+  })
+})
+
+describe('parseNote', () => {
+  it('單一 / 多條生命線', () => {
+    expect(parseNote('note over A: hi')).toEqual({ over: ['A'], text: 'hi' })
+    expect(parseNote('note over Client, AuthService: 先驗證 token')).toEqual({
+      over: ['Client', 'AuthService'],
+      text: '先驗證 token',
+    })
+  })
+  it(':Class 寫法', () => {
+    expect(parseNote('note over :Auth, B: x')).toEqual({ over: [':Auth', 'B'], text: 'x' })
+  })
+  it('文字含冒號：以第一個能讓生命線都合法的冒號分隔', () => {
+    expect(parseNote('note over DB: 時間: 3s')).toEqual({ over: ['DB'], text: '時間: 3s' })
+  })
+  it('不分大小寫、可空文字', () => {
+    expect(parseNote('NOTE Over A:')).toEqual({ over: ['A'], text: '' })
+  })
+  it.each(['note A: x', 'note over : x', 'note over A B: x', 'note over A', 'A -> B: x'])('失敗輸入 %j 回傳 null', (s) => {
+    expect(parseNote(s)).toBeNull()
   })
 })
 

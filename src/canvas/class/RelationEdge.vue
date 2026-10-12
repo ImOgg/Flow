@@ -4,7 +4,7 @@ import { pathOf, type Point } from '../../model/classLayout'
 import type { RelationKind } from '../../model/types'
 
 const props = defineProps<{ kind: RelationKind; points: Point[]; selected: boolean }>()
-const emit = defineEmits<{ down: [e: PointerEvent] }>()
+const emit = defineEmits<{ down: [e: PointerEvent]; reset: [] }>()
 
 // UML 符號：聚合 / 組合的菱形在整體端（起點），三角與箭頭在目標端（終點）
 const STYLE: Record<RelationKind, { dashed?: boolean; start?: string; end?: string }> = {
@@ -21,7 +21,7 @@ const style = computed(() => STYLE[props.kind])
 </script>
 
 <template>
-  <g @pointerdown="emit('down', $event)">
+  <g @pointerdown="emit('down', $event)" @dblclick.stop="emit('reset')">
     <path :d="d" fill="none" stroke="transparent" stroke-width="10" data-export="false" />
     <path
       :d="d"

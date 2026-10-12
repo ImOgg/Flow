@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { ClassifierKind, Id, RelationKind } from '../model/types'
 
-export type ClassTool = 'select' | ClassifierKind | RelationKind
+export type ClassTool = 'select' | ClassifierKind | RelationKind | 'note' | 'noteLink' | 'package'
 
 export type Editing =
   | { kind: 'name'; id: Id }
@@ -11,6 +11,8 @@ export type Editing =
   | { kind: 'lifeline'; id: Id }
   | { kind: 'message'; id: Id }
   | { kind: 'guard'; id: Id; operand: number }
+  | { kind: 'note'; id: Id } // 類別圖或循序圖的 Note
+  | { kind: 'package'; id: Id }
 
 export const useEditorStore = defineStore('editor', () => {
   const activeDiagramId = ref<Id | null>(null)

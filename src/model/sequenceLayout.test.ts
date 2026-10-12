@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as ops from './ops'
-import { layoutSequence, lifelineTitle, SEQ } from './sequenceLayout'
+import { layoutSequence, lifelineTitle, SEQ, type SequenceLayout } from './sequenceLayout'
+import type { InsertPos, Project } from './types'
 
 const measure = (t: string) => t.length * 7
 
@@ -24,7 +25,12 @@ describe('layoutSequence', () => {
     const ys = L.messages.map((m) => m.y)
     expect(ys[1] - ys[0]).toBe(SEQ.ROW)
     expect(ys[2] - ys[1]).toBe(SEQ.ROW)
-    expect(L.messages[2]).toMatchObject({ x1: L.lifelines[2].cx, x2: L.lifelines[0].cx, self: false })
+    // 往左的訊息：從 C 區段左緣出發，到 A 第二層區段（A 已因第一則訊息有一段）的右緣
+    expect(L.messages[2]).toMatchObject({
+      x1: L.lifelines[2].cx - SEQ.ACT_W / 2,
+      x2: L.lifelines[0].cx + SEQ.ACT_W / 2 + SEQ.ACT_STEP,
+      self: false,
+    })
     expect(L.lineBottom).toBeGreaterThan(ys[2])
   })
 
@@ -102,6 +108,127 @@ describe('layoutSequence', () => {
     const { a, b, msg, layout } = setup()
     msg(a, b, 'x'.repeat(60))
     expect(layout().col).toBeGreaterThan(60 * 7)
+  })
+})
+
+describe('activations', () => {
+  const ret = (p: Project, sd: string, from: string, to: string, pos?: InsertPos) =>
+    ops.insertMessage(p, sd, { from, to, text: 'r', type: 'return' }, pos)
+  const of = (L: SequenceLayout, id: string) =>
+    L.activations.filter((a) => a.lifelineId === id).map(({ depth, y1, y2 }) => ({ depth, y1, y2 }))
+
+  it('一來一回：接收端從呼叫到回傳，發送端從呼叫開始', () => {
+    const { p, sd, a, b, msg, layout } = setup()
+    msg(a, b)
+    ret(p, sd, b, a)
+    const L = layout()
+    const [m1, m2] = L.messages
+    expect(of(L, b)).toEqual([{ depth: 0, y1: m1.y, y2: m2.y }])
+    expect(of(L, a)).toEqual([{ depth: 0, y1: m1.y, y2: m2.y + SEQ.ACT_TAIL }])
+    // 箭頭連到區段邊緣
+    expect(m1.x1).toBe(L.lifelines[0].cx + SEQ.ACT_W / 2)
+    expect(m1.x2).toBe(L.lifelines[1].cx - SEQ.ACT_W / 2)
+    expect(m2.x1).toBe(L.lifelines[1].cx - SEQ.ACT_W / 2)
+  })
+
+  it('巢狀呼叫：C 的區段落在 B 之內，B 結束在 r2', () => {
+    const { p, sd, a, b, c, msg, layout } = setup()
+    msg(a, b)
+    msg(b, c)
+    ret(p, sd, c, b)
+    ret(p, sd, b, a)
+    const L = layout()
+    const [bAct] = of(L, b)
+    const [cAct] = of(L, c)
+    expect(bAct.y2).toBe(L.messages[3].y)
+    expect(cAct.y1).toBeGreaterThan(bAct.y1)
+    expect(cAct.y2).toBeLessThan(bAct.y2)
+  })
+
+  it('自呼叫：往右錯開一層，自迴圈回到它的邊緣', () => {
+    const { p, sd, a, b, msg, layout } = setup()
+    msg(a, b)
+    msg(b, b)
+    ret(p, sd, b, a)
+    const L = layout()
+    const acts = of(L, b)
+    expect(acts.map((x) => x.depth)).toEqual([0, 1])
+    const self = L.messages[1]
+    expect(acts[1].y1).toBe(self.y + SEQ.SELF_H)
+    const inner = L.activations.find((x) => x.lifelineId === b && x.depth === 1)!
+    expect(inner.x).toBe(L.lifelines[1].cx - SEQ.ACT_W / 2 + SEQ.ACT_STEP)
+    expect(self.x2).toBe(inner.x + SEQ.ACT_W)
+    // r 回傳彈出的是內層（自呼叫）區段，外層延伸到最後相關訊息
+    expect(acts[1].y2).toBe(L.messages[2].y)
+    expect(acts[0].y2).toBe(L.messages[2].y + SEQ.ACT_TAIL)
+  })
+
+  it('沒有回傳：延伸到該生命線最後一則相關訊息下方', () => {
+    const { a, b, c, msg, layout } = setup()
+    msg(a, b)
+    msg(a, c)
+    msg(c, b)
+    const L = layout()
+    const [bAct] = of(L, b)
+    expect(bAct.y2).toBe(L.messages[2].y + SEQ.ACT_TAIL)
+  })
+
+  it('不成對的回傳被忽略', () => {
+    const { p, sd, a, b, layout } = setup()
+    ret(p, sd, b, a)
+    const L = layout()
+    expect(L.activations).toEqual([])
+    expect(L.messages[0]).toMatchObject({ x1: L.lifelines[1].cx, x2: L.lifelines[0].cx })
+  })
+
+  it('跨 loop 片段配對：loop 內呼叫、loop 外回傳', () => {
+    const { p, sd, a, b, msg, layout } = setup()
+    const m = msg(a, b)
+    ops.wrapInFragment(p, sd, [m], 'loop')
+    ret(p, sd, b, a)
+    const L = layout()
+    expect(of(L, b)).toEqual([{ depth: 0, y1: L.messages[0].y, y2: L.messages[1].y }])
+  })
+})
+
+describe('Note 列', () => {
+  const note = (p: Project, sd: string, over: string[], text: string, pos?: InsertPos) =>
+    ops.insertNote(p, sd, over, text, pos)
+
+  it('三行 Note 撐開列高，下方訊息往下移', () => {
+    const a1 = setup()
+    a1.msg(a1.a, a1.b)
+    note(a1.p, a1.sd, [a1.a], 'x')
+    a1.msg(a1.a, a1.b)
+    const a3 = setup()
+    a3.msg(a3.a, a3.b)
+    note(a3.p, a3.sd, [a3.a], '1\n2\n3')
+    a3.msg(a3.a, a3.b)
+    const L1 = a1.layout()
+    const L3 = a3.layout()
+    expect(L3.notes[0].h).toBeGreaterThan(L1.notes[0].h)
+    expect(L3.messages[1].y - L1.messages[1].y).toBe(L3.notes[0].h - L1.notes[0].h)
+    expect(L3.messages[1].y).toBeGreaterThan(L3.notes[0].y + L3.notes[0].h)
+  })
+
+  it('水平範圍：單一生命線置中；多條從最左到最右', () => {
+    const { p, sd, a, b, c, layout } = setup()
+    note(p, sd, [b], 'x')
+    note(p, sd, [c, a], 'x')
+    const L = layout()
+    const [one, many] = L.notes
+    expect(one.x + one.w / 2).toBe(L.lifelines[1].cx)
+    expect(many.x).toBeLessThan(L.lifelines[0].cx)
+    expect(many.x + many.w).toBeGreaterThan(L.lifelines[2].cx)
+  })
+
+  it('Note 在片段內時片段寬度涵蓋它', () => {
+    const { p, sd, a, c, msg, layout } = setup()
+    const m = msg(a, a)
+    const f = ops.wrapInFragment(p, sd, [m], 'opt')!
+    note(p, sd, [c], 'x', { container: { fragmentId: f, operand: 0 }, index: 1 })
+    const L = layout()
+    expect(L.fragments[0].x2).toBeGreaterThan(L.lifelines[2].cx)
   })
 })
 
