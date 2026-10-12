@@ -8,7 +8,7 @@
 ## 2. Activation bar
 
 - [x] 2.1 依 D2 在 `sequenceLayout.ts` 計算 `activations` 並修正訊息端點 x；驗證測試涵蓋一來一回、巢狀呼叫、自呼叫錯開一層、沒有回傳延伸到最後相關訊息、不成對的回傳被忽略、跨 loop 片段的配對
-- [ ] 2.2 在 `SequenceDiagramView.vue` 繪製執行區段（白底細長矩形、`pointer-events="none"`）；手動驗證 spec「一來一回」「巢狀呼叫」「自呼叫的巢狀區段」情境，從生命線拖拉建立訊息仍可用，匯出 SVG 含執行區段
+- [x] 2.2 在 `SequenceDiagramView.vue` 繪製執行區段（白底細長矩形、`pointer-events="none"`）；手動驗證 spec「一來一回」「巢狀呼叫」「自呼叫的巢狀區段」情境，從生命線拖拉建立訊息仍可用，匯出 SVG 含執行區段
 
 ## 3. 連線轉折點
 
@@ -17,7 +17,7 @@
 
 ## 4. Note
 
-- [ ] 4.1 在 `classLayout.ts` 實作共用的 `noteBox(text, measure)`；在 `quickInput.ts` 實作 `parseNote`（D5 的冒號判斷規則）；驗證測試涵蓋多行尺寸、空白最小尺寸、單一 / 多條生命線、`A: Class` 寫法、文字含冒號、不分大小寫、失敗輸入回傳 null
+- [x] 4.1 在 `classLayout.ts` 實作共用的 `noteBox(text, measure)`；在 `quickInput.ts` 實作 `parseNote`（D5 的冒號判斷規則）；驗證測試涵蓋多行尺寸、空白最小尺寸、單一 / 多條生命線、`A: Class` 寫法、文字含冒號、不分大小寫、失敗輸入回傳 null
 - [x] 4.2 在 `ops.ts` 新增類別圖 Note 操作（新增、改文字、連結 / 取消連結元素、刪除），將 `moveNodes` 擴充為 `moveItems`，並依 D6 讓 `removeFromDiagram` 與 `deleteElement` 清除 Note 連結；驗證測試涵蓋「連結的元素從圖移除後連結消失、Note 保留」「從模型刪除元素後所有圖的連結消失」「Class 與 Note 一起移動」
 - [x] 4.3 在 `ops.ts` 新增循序圖 Note 插入與改文字，並讓 `deleteLifeline` 清理 `over`；在 `sequenceLayout.ts` 排版 Note 列（列高隨行數、水平範圍、參與片段範圍）；驗證測試涵蓋「三行 Note 撐開列高、下方訊息下移」「刪除覆蓋的其中一條生命線」「覆蓋的生命線全刪則 Note 刪除」「Note 在片段內時片段寬度涵蓋它」
 - [x] 4.4 `InlineInput.vue` 新增 `multiline` 模式（textarea、Shift+Enter 換行、Enter 送出、Esc 取消）；手動驗證 spec「多行輸入」「取消編輯」情境，且既有單行輸入行為不變
