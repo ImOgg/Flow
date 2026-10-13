@@ -188,4 +188,40 @@ describe('serialize / parseProject', () => {
     expect(rf.subgraphs[0].nodeIds).toEqual(['a'])
     expect(r.warnings).toHaveLength(2)
   })
+
+  it('含手動大小的套件與子圖往返一致', () => {
+    const p = sample()
+    const cd = p.diagrams[0]
+    if (cd.type !== 'class') throw new Error()
+    cd.packages.push({ id: 'k', name: 'auth', x: 0, y: 0, w: 400, h: 300, elementIds: [] })
+    const f = ops.getFlowchart(p, ops.addDiagram(p, 'flowchart', 'FC'))
+    f.subgraphs.push({ id: 'g', title: '後端', x: 0, y: 0, w: 500, h: 200, nodeIds: [] })
+    const r = parseProject(serialize(p))
+    expect(r.ok && r.project).toEqual(p)
+    expect(r.ok && r.warnings).toEqual([])
+  })
+
+  it('無效的手動大小被略過並產生 warning，其餘照常載入', () => {
+    const p = JSON.parse(serialize(sample()))
+    p.diagrams[0].packages.push({ id: 'k', name: 'auth', x: 0, y: 0, w: -1, h: 'abc', elementIds: [] })
+    p.diagrams.push({ id: 'f', type: 'flowchart', name: 'FC', nodes: [], edges: [], subgraphs: [{ id: 'g', title: 'G', x: 0, y: 0, w: 300, h: 0, nodeIds: [] }] })
+    const r = parseProject(JSON.stringify(p))
+    if (!r.ok) throw new Error(r.error)
+    const cd = r.project.diagrams[0]
+    const fc = r.project.diagrams[2]
+    if (cd.type !== 'class' || fc.type !== 'flowchart') throw new Error()
+    expect(cd.packages[0]).toEqual({ id: 'k', name: 'auth', x: 0, y: 0, elementIds: [] })
+    expect(fc.subgraphs[0]).toEqual({ id: 'g', title: 'G', x: 0, y: 0, w: 300, nodeIds: [] })
+    expect(r.warnings).toHaveLength(3)
+  })
+
+  it('缺少手動大小的檔案照常載入', () => {
+    const p = sample()
+    const cd = p.diagrams[0]
+    if (cd.type !== 'class') throw new Error()
+    cd.packages.push({ id: 'k', name: 'auth', x: 0, y: 0, elementIds: [] })
+    const r = parseProject(serialize(p))
+    expect(r.ok && r.project).toEqual(p)
+    expect(r.ok && r.warnings).toEqual([])
+  })
 })

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 流程圖畫布：節點、箭頭與標籤、子圖框。互動比照類別圖（見 design D2：先不抽共用畫布）
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
-import { moveSegment, packageAt, packageBox, PKG_TAB_H, type Frame, type Point, type Rect } from '../../model/classLayout'
+import { moveSegment, packageAt, packageBox, PKG_MIN_H, PKG_MIN_W, PKG_TAB_H, type Frame, type Point, type Rect } from '../../model/classLayout'
 import { flowNodeBox, flowRoute, labelPos, type ShapedRect } from '../../model/flowLayout'
 import * as ops from '../../model/ops'
 import type { FlowchartDiagram, FlowShape, Id, Subgraph } from '../../model/types'
@@ -37,7 +37,7 @@ const linking = ref<{ sourceId: Id; to: Point } | null>(null)
 // shallowRef：bends 會直接寫進專案，不能是響應式 Proxy（structuredClone 無法複製）
 const bendDrag = shallowRef<{ id: Id; bends: Point[] } | null>(null)
 
-const frame = (g: Subgraph): Frame => ({ id: g.id, x: g.x, y: g.y, ids: g.nodeIds })
+const frame = (g: Subgraph): Frame => ({ id: g.id, x: g.x, y: g.y, w: g.w, h: g.h, ids: g.nodeIds })
 
 /** 正在跟著拖曳移動的節點：直接選取的，加上被拖曳子圖的成員 */
 const movingNodes = computed(() => {
@@ -78,7 +78,8 @@ const sgRects = computed(() => {
 
 const subgraphs = computed(() =>
   props.diagram.subgraphs.map((g) => {
-    const shifted = shift(g, !!drag.value?.ids.has(g.id))
+    const moved = shift(g, !!drag.value?.ids.has(g.id))
+    const shifted = resize.value?.id === g.id ? { ...moved, w: resize.value.w, h: resize.value.h } : moved
     return { sg: g, shifted, box: packageBox(frame(shifted), sgRects.value), tabW: measureText(g.title, true) + 16 }
   }),
 )
@@ -236,6 +237,40 @@ function onSegmentDown(e: PointerEvent, id: Id, i: number) {
       if (b) store.apply((p) => ops.setFlowEdgeBends(p, dId(), id, b.bends))
     },
   )
+}
+
+// ---------- 子圖調整大小 ----------
+// 拖曳把手中的預覽大小（同 bendDrag 用 shallowRef）
+const resize = shallowRef<{ id: Id; w: number; h: number } | null>(null)
+
+/** 只選取一個子圖時才顯示右下角把手 */
+const resizable = computed(() =>
+  ed.selection.length === 1 ? subgraphs.value.find((x) => x.sg.id === ed.selection[0]) : undefined,
+)
+
+/** 把手拖到哪裡，最小寬高就是游標到錨點 (x, y) 的距離（不小於預設）；放開一次寫入 */
+function onResizeDown(e: PointerEvent, id: Id) {
+  if (e.button !== 0) return
+  e.stopPropagation()
+  const k = props.diagram.subgraphs.find((x) => x.id === id)
+  if (!k) return
+  trackPointer(
+    e,
+    (m) => {
+      const p = world(m)
+      resize.value = { id, w: Math.max(PKG_MIN_W, Math.round(p.x - k.x)), h: Math.max(PKG_MIN_H, Math.round(p.y - k.y)) }
+    },
+    () => {
+      const r = resize.value
+      resize.value = null
+      if (r && (r.w !== k.w || r.h !== k.h)) store.apply((p) => ops.setSubgraphSize(p, dId(), id, r.w, r.h))
+    },
+  )
+}
+
+function resetSize(id: Id) {
+  const k = props.diagram.subgraphs.find((x) => x.id === id)
+  if (k?.w !== undefined || k?.h !== undefined) store.apply((p) => ops.resetSubgraphSize(p, dId(), id))
 }
 
 function resetEdge(id: Id) {
@@ -415,7 +450,7 @@ const isEmpty = computed(() => !props.diagram.nodes.length && !props.diagram.sub
         拖曳控制點調整路徑；雙擊箭頭編輯標籤；Delete 刪除
       </template>
       <template v-else>
-        雙擊節點編輯文字（Shift+Enter 換行）；選取節點按 Tab 建立下一步；雙擊箭頭編輯標籤；拖曳子圖標題整組移動；Delete 刪除
+        雙擊節點編輯文字（Shift+Enter 換行）；選取節點按 Tab 建立下一步；雙擊箭頭編輯標籤；拖曳子圖標題整組移動、拖曳右下角把手調整大小（雙擊把手重設）；Delete 刪除
       </template>
     </div>
     <div class="drop" :class="{ linking: ed.tool === 'edge' }">
@@ -479,6 +514,20 @@ const isEmpty = computed(() => !props.diagram.nodes.length && !props.diagram.sub
           :selected="highlighted(n.node.id)"
           @down="onItemDown($event, n.node.id)"
           @edit="ed.editing = { kind: 'flowNode', id: n.node.id }"
+        />
+        <!-- 選取中子圖的調整大小把手 -->
+        <rect
+          v-if="resizable"
+          :x="resizable.box.x + resizable.box.w - 4"
+          :y="resizable.box.y + resizable.box.h - 4"
+          width="8"
+          height="8"
+          fill="#fff"
+          stroke="#1a73e8"
+          style="cursor: nwse-resize"
+          data-export="false"
+          @pointerdown="onResizeDown($event, resizable.sg.id)"
+          @dblclick.stop="resetSize(resizable.sg.id)"
         />
         <!-- 選取中箭頭的線段控制點：畫在最上層，避免靠近節點的短線段被蓋住 -->
         <template v-for="e in edges" :key="`handles-${e.edge.id}`">

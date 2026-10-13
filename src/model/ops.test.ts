@@ -547,3 +547,35 @@ describe('流程圖', () => {
     expect([f.nodes.length, f.edges.length]).toEqual([1, 0])
   })
 })
+
+describe('套件與子圖框大小', () => {
+  it('套件：設定、移動保留、重設；成員不變', () => {
+    const { p, user, cd1 } = setup()
+    ops.addNode(p, cd1, user, 0, 0)
+    const k = ops.addPackage(p, cd1, 0, 0)
+    ops.setPackageMembership(p, cd1, user, k)
+    ops.setPackageSize(p, cd1, k, 400, 300)
+    expect(cls(p, cd1).packages[0]).toMatchObject({ w: 400, h: 300, elementIds: [user] })
+    ops.moveItems(p, cd1, [k], 100, 50)
+    expect(cls(p, cd1).packages[0]).toMatchObject({ x: 100, y: 50, w: 400, h: 300 })
+    ops.resetPackageSize(p, cd1, k)
+    const pkg = cls(p, cd1).packages[0]
+    expect('w' in pkg || 'h' in pkg).toBe(false)
+    expect(pkg.elementIds).toEqual([user])
+  })
+
+  it('子圖：設定、移動保留、重設；成員不變', () => {
+    const p = ops.emptyProject()
+    const d = ops.addDiagram(p, 'flowchart', 'FC')
+    const n = ops.addFlowNode(p, d, 'process', 0, 0)
+    const g = ops.addSubgraph(p, d, 0, 0)
+    ops.setSubgraphMembership(p, d, n, g)
+    ops.setSubgraphSize(p, d, g, 500, 200)
+    ops.moveFlowItems(p, d, [g], 10, 20)
+    expect(ops.getFlowchart(p, d).subgraphs[0]).toMatchObject({ x: 10, y: 20, w: 500, h: 200, nodeIds: [n] })
+    ops.resetSubgraphSize(p, d, g)
+    const sg = ops.getFlowchart(p, d).subgraphs[0]
+    expect('w' in sg || 'h' in sg).toBe(false)
+    expect(sg.nodeIds).toEqual([n])
+  })
+})

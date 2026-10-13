@@ -220,6 +220,20 @@ export function renamePackage(p: Project, diagramId: Id, id: Id, name: string) {
   if (k) k.name = name
 }
 
+/** 手動指定套件框的最小寬高（從 x, y 起算），成員不變 */
+export function setPackageSize(p: Project, diagramId: Id, id: Id, w: number, h: number) {
+  const k = getClassDiagram(p, diagramId).packages.find((x) => x.id === id)
+  if (k) Object.assign(k, { w, h })
+}
+
+/** 回到自動大小 */
+export function resetPackageSize(p: Project, diagramId: Id, id: Id) {
+  const k = getClassDiagram(p, diagramId).packages.find((x) => x.id === id)
+  if (!k) return
+  delete k.w
+  delete k.h
+}
+
 /** 讓元素只屬於 packageId（null = 離開所有套件） */
 export function setPackageMembership(p: Project, diagramId: Id, elementId: Id, packageId: Id | null) {
   for (const k of getClassDiagram(p, diagramId).packages) {
@@ -280,6 +294,20 @@ export function addSubgraph(p: Project, diagramId: Id, x: number, y: number, tit
 export function renameSubgraph(p: Project, diagramId: Id, id: Id, title: string) {
   const g = getFlowchart(p, diagramId).subgraphs.find((x) => x.id === id)
   if (g) g.title = title
+}
+
+/** 手動指定子圖框的最小寬高（從 x, y 起算），成員不變 */
+export function setSubgraphSize(p: Project, diagramId: Id, id: Id, w: number, h: number) {
+  const g = getFlowchart(p, diagramId).subgraphs.find((x) => x.id === id)
+  if (g) Object.assign(g, { w, h })
+}
+
+/** 回到自動大小 */
+export function resetSubgraphSize(p: Project, diagramId: Id, id: Id) {
+  const g = getFlowchart(p, diagramId).subgraphs.find((x) => x.id === id)
+  if (!g) return
+  delete g.w
+  delete g.h
 }
 
 /** 讓節點只屬於 subgraphId（null = 離開所有子圖） */

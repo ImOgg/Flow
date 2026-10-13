@@ -52,6 +52,15 @@ export function parseProject(text: string): ParseResult {
 
   const p = data as unknown as Project
   const warnings: string[] = []
+  /** 框的手動大小：不是有限正數就略過該欄位（回到自動大小） */
+  const checkSize = (k: { w?: unknown; h?: unknown }, label: string) => {
+    for (const key of ['w', 'h'] as const) {
+      const v = k[key]
+      if (v === undefined || (typeof v === 'number' && Number.isFinite(v) && v > 0)) continue
+      delete k[key]
+      warnings.push(`${label} 的 ${key} 不是有效的大小，已略過`)
+    }
+  }
   const { elements, relations } = p.model
 
   for (const r of Object.values(relations)) {
@@ -80,6 +89,7 @@ export function parseProject(text: string): ParseResult {
         })
       for (const n of d.notes) n.links = keep(n.links, '註解連結')
       for (const k of d.packages) k.elementIds = keep(k.elementIds, `套件 ${k.name} `)
+      for (const k of d.packages) checkSize(k, `「${d.name}」套件 ${k.name}`)
     } else if (d.type === 'flowchart') {
       const nodes = new Set(d.nodes.map((n) => n.id))
       d.edges = d.edges.filter((e) => {
@@ -92,6 +102,7 @@ export function parseProject(text: string): ParseResult {
           if (!nodes.has(id)) warnings.push(`「${d.name}」子圖 ${g.title} 略過不存在的節點 ${id}`)
           return nodes.has(id)
         })
+        checkSize(g, `「${d.name}」子圖 ${g.title}`)
       }
     } else if (d.type === 'sequence') {
       for (const l of d.lifelines) {

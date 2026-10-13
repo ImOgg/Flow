@@ -74,6 +74,9 @@ export interface Package {
   name: string
   x: number
   y: number
+  /** 手動指定的最小寬高（從 x, y 起算）；省略 = 自動大小 */
+  w?: number
+  h?: number
   elementIds: Id[]
 }
 
@@ -163,6 +166,9 @@ export interface Subgraph {
   title: string
   x: number
   y: number
+  /** 手動指定的最小寬高（從 x, y 起算）；省略 = 自動大小 */
+  w?: number
+  h?: number
   nodeIds: Id[]
 }
 
