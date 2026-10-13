@@ -6,6 +6,9 @@ import type {
   Classifier,
   ClassifierKind,
   Diagram,
+  FlowchartDiagram,
+  FlowNode,
+  FlowShape,
   Fragment,
   FragmentType,
   Id,
@@ -18,11 +21,13 @@ import type {
   SeqItem,
   SequenceDiagram,
 } from './types'
+import type { Measure } from './classLayout'
+import { flowNodeBox, nextNodePos } from './flowLayout'
 
 export const newId = (): Id => crypto.randomUUID()
 
 export function emptyProject(): Project {
-  return { version: 2, model: { elements: {}, relations: {} }, diagrams: [] }
+  return { version: 3, model: { elements: {}, relations: {} }, diagrams: [] }
 }
 
 const DEFAULT_NAMES: Record<ClassifierKind, string> = {
@@ -68,7 +73,7 @@ export function deleteElement(p: Project, id: Id) {
   for (const d of p.diagrams) {
     if (d.type === 'class') {
       removeFromDiagram(p, d.id, [id])
-    } else {
+    } else if (d.type === 'sequence') {
       for (const l of d.lifelines) if (l.elementId === id) delete l.elementId
     }
   }
@@ -96,11 +101,17 @@ export function deleteRelation(p: Project, id: Id) {
 
 export function addDiagram(p: Project, type: Diagram['type'], name: string): Id {
   const id = newId()
-  p.diagrams.push(
-    type === 'class'
-      ? { id, type, name, nodes: [], edges: [], notes: [], packages: [] }
-      : { id, type, name, lifelines: [], items: [] },
-  )
+  switch (type) {
+    case 'class':
+      p.diagrams.push({ id, type, name, nodes: [], edges: [], notes: [], packages: [] })
+      break
+    case 'sequence':
+      p.diagrams.push({ id, type, name, lifelines: [], items: [] })
+      break
+    case 'flowchart':
+      p.diagrams.push({ id, type, name, nodes: [], edges: [], subgraphs: [] })
+      break
+  }
   return id
 }
 
@@ -215,6 +226,108 @@ export function setPackageMembership(p: Project, diagramId: Id, elementId: Id, p
     k.elementIds = k.elementIds.filter((el) => el !== elementId)
     if (k.id === packageId) k.elementIds.push(elementId)
   }
+}
+
+// ---------- 流程圖 ----------
+
+export function addFlowNode(p: Project, diagramId: Id, shape: FlowShape, x: number, y: number, text = ''): Id {
+  const id = newId()
+  getFlowchart(p, diagramId).nodes.push({ id, shape, text, x, y })
+  return id
+}
+
+const flowNode = (p: Project, diagramId: Id, id: Id) => getFlowchart(p, diagramId).nodes.find((n) => n.id === id)
+const flowEdge = (p: Project, diagramId: Id, id: Id) => getFlowchart(p, diagramId).edges.find((e) => e.id === id)
+
+export function setFlowNodeText(p: Project, diagramId: Id, id: Id, text: string) {
+  const n = flowNode(p, diagramId, id)
+  if (n) n.text = text
+}
+
+/** 切換形狀：文字、位置與相連箭頭都保留 */
+export function setFlowNodeShape(p: Project, diagramId: Id, id: Id, shape: FlowShape) {
+  const n = flowNode(p, diagramId, id)
+  if (n) n.shape = shape
+}
+
+export function addFlowEdge(p: Project, diagramId: Id, from: Id, to: Id, label = ''): Id {
+  const id = newId()
+  getFlowchart(p, diagramId).edges.push({ id, from, to, label })
+  return id
+}
+
+export function setFlowEdgeLabel(p: Project, diagramId: Id, id: Id, label: string) {
+  const e = flowEdge(p, diagramId, id)
+  if (e) e.label = label
+}
+
+export function setFlowEdgeBends(p: Project, diagramId: Id, id: Id, bends: Point[]) {
+  const e = flowEdge(p, diagramId, id)
+  if (e) e.bends = bends
+}
+
+export function resetFlowEdgeBends(p: Project, diagramId: Id, id: Id) {
+  const e = flowEdge(p, diagramId, id)
+  if (e) delete e.bends
+}
+
+export function addSubgraph(p: Project, diagramId: Id, x: number, y: number, title = '子圖'): Id {
+  const id = newId()
+  getFlowchart(p, diagramId).subgraphs.push({ id, title, x, y, nodeIds: [] })
+  return id
+}
+
+export function renameSubgraph(p: Project, diagramId: Id, id: Id, title: string) {
+  const g = getFlowchart(p, diagramId).subgraphs.find((x) => x.id === id)
+  if (g) g.title = title
+}
+
+/** 讓節點只屬於 subgraphId（null = 離開所有子圖） */
+export function setSubgraphMembership(p: Project, diagramId: Id, nodeId: Id, subgraphId: Id | null) {
+  for (const g of getFlowchart(p, diagramId).subgraphs) {
+    g.nodeIds = g.nodeIds.filter((n) => n !== nodeId)
+    if (g.id === subgraphId) g.nodeIds.push(nodeId)
+  }
+}
+
+/** 移動節點與子圖；子圖連同成員移動，成員同時被選取時只移動一次 */
+export function moveFlowItems(p: Project, diagramId: Id, ids: Id[], dx: number, dy: number) {
+  const d = getFlowchart(p, diagramId)
+  const nodeIds = new Set(ids)
+  for (const g of d.subgraphs) {
+    if (!nodeIds.has(g.id)) continue
+    g.x += dx
+    g.y += dy
+    for (const n of g.nodeIds) nodeIds.add(n)
+  }
+  for (const n of d.nodes) {
+    if (!nodeIds.has(n.id)) continue
+    n.x += dx
+    n.y += dy
+  }
+}
+
+/** ids 可混合節點、箭頭、子圖。刪除節點連帶刪除相連箭頭並從子圖成員移除；刪除子圖只移除框 */
+export function removeFlowItems(p: Project, diagramId: Id, ids: Id[]) {
+  const d = getFlowchart(p, diagramId)
+  const del = new Set(ids)
+  d.nodes = d.nodes.filter((n) => !del.has(n.id))
+  d.edges = d.edges.filter((e) => !del.has(e.id) && !del.has(e.from) && !del.has(e.to))
+  d.subgraphs = d.subgraphs.filter((g) => !del.has(g.id))
+  for (const g of d.subgraphs) g.nodeIds = g.nodeIds.filter((n) => !del.has(n))
+}
+
+/** 在 fromId 下方建立空白處理節點並連一條箭頭過去，回傳新節點 id。位置規則見 nextNodePos */
+export function addNextNode(p: Project, diagramId: Id, fromId: Id, measure: Measure): Id | null {
+  const d = getFlowchart(p, diagramId)
+  const rectOf = (n: FlowNode) => ({ x: n.x, y: n.y, ...flowNodeBox(n, measure) })
+  const src = d.nodes.find((n) => n.id === fromId)
+  if (!src) return null
+  const size = flowNodeBox({ shape: 'process', text: '' }, measure)
+  const pos = nextNodePos(rectOf(src), size, d.nodes.map(rectOf))
+  const id = addFlowNode(p, diagramId, 'process', pos.x, pos.y)
+  addFlowEdge(p, diagramId, fromId, id)
+  return id
 }
 
 // ---------- 循序圖：生命線 ----------
@@ -367,6 +480,12 @@ export function getClassDiagram(p: Project, id: Id): ClassDiagram {
 export function getSequenceDiagram(p: Project, id: Id): SequenceDiagram {
   const d = getDiagram(p, id)
   if (d.type !== 'sequence') throw new Error(`not a sequence diagram: ${id}`)
+  return d
+}
+
+export function getFlowchart(p: Project, id: Id): FlowchartDiagram {
+  const d = getDiagram(p, id)
+  if (d.type !== 'flowchart') throw new Error(`not a flowchart: ${id}`)
   return d
 }
 

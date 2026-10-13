@@ -136,10 +136,49 @@ export interface SequenceDiagram {
   items: SeqItem[]
 }
 
-export type Diagram = ClassDiagram | SequenceDiagram
+export type FlowShape = 'process' | 'decision' | 'terminal' | 'io' | 'database'
+
+/** 流程圖節點：只屬於該圖，不進模型；尺寸依文字與形狀即時計算 */
+export interface FlowNode {
+  id: Id
+  shape: FlowShape
+  text: string
+  x: number
+  y: number
+}
+
+/** 流程圖箭頭；允許 from === to（自我迴圈） */
+export interface FlowEdge {
+  id: Id
+  from: Id
+  to: Id
+  label: string
+  /** 中間的轉折點；省略 = 自動路徑 */
+  bends?: Point[]
+}
+
+/** 流程圖子圖框：一個節點最多屬於一個子圖 */
+export interface Subgraph {
+  id: Id
+  title: string
+  x: number
+  y: number
+  nodeIds: Id[]
+}
+
+export interface FlowchartDiagram {
+  id: Id
+  type: 'flowchart'
+  name: string
+  nodes: FlowNode[]
+  edges: FlowEdge[]
+  subgraphs: Subgraph[]
+}
+
+export type Diagram = ClassDiagram | SequenceDiagram | FlowchartDiagram
 
 export interface Project {
-  version: 2
+  version: 3
   model: {
     elements: Record<Id, Classifier>
     relations: Record<Id, Relation>

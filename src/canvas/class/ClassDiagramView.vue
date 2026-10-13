@@ -8,14 +8,15 @@ import {
   PKG_TAB_H,
   routeWith,
   moveSegment,
+  type Frame,
   type NodeBox,
   type Point,
   type Rect,
 } from '../../model/classLayout'
 import * as ops from '../../model/ops'
-import type { ClassDiagram, ClassifierKind, Id, RelationKind } from '../../model/types'
+import type { ClassDiagram, ClassifierKind, Id, Package, RelationKind } from '../../model/types'
 import { exportPng, exportSvg } from '../../io/export'
-import { useEditorStore, type ClassTool } from '../../store/editor'
+import { useEditorStore, type ClassTool, type FlowTool } from '../../store/editor'
 import { useProjectStore } from '../../store/project'
 import Canvas from '../Canvas.vue'
 import InlineInput from '../InlineInput.vue'
@@ -45,8 +46,8 @@ const RELATION_TOOLS: [RelationKind, string][] = [
   ['aggregation', '聚合'],
   ['composition', '組合'],
 ]
-const isClassifierTool = (t: ClassTool): t is ClassifierKind => CLASSIFIER_TOOLS.some(([k]) => k === t)
-const isRelationTool = (t: ClassTool): t is RelationKind => RELATION_TOOLS.some(([k]) => k === t)
+const isClassifierTool = (t: ClassTool | FlowTool): t is ClassifierKind => CLASSIFIER_TOOLS.some(([k]) => k === t)
+const isRelationTool = (t: ClassTool | FlowTool): t is RelationKind => RELATION_TOOLS.some(([k]) => k === t)
 
 // 拖曳中的暫時位移，放開才寫回 store。ids 可混合節點、Note、套件
 const drag = ref<{ ids: Set<Id>; dx: number; dy: number } | null>(null)
@@ -62,6 +63,7 @@ const movingNodes = computed(() => {
   if (d) for (const k of props.diagram.packages) if (d.ids.has(k.id)) k.elementIds.forEach((el) => s.add(el))
   return s
 })
+const frame = (k: Package): Frame => ({ id: k.id, x: k.x, y: k.y, ids: k.elementIds })
 const shift = <T extends Point>(o: T, moving: boolean): T =>
   moving && drag.value ? { ...o, x: o.x + drag.value.dx, y: o.y + drag.value.dy } : o
 
@@ -106,7 +108,7 @@ const noteRects = computed(() => new Map(notes.value.map((n) => [n.note.id, { x:
 const packages = computed(() =>
   props.diagram.packages.map((k) => {
     const shifted = shift(k, !!drag.value?.ids.has(k.id))
-    return { pkg: k, shifted, box: packageBox(shifted, pkgRects.value), tabW: measureText(k.name, true) + 16 }
+    return { pkg: k, shifted, box: packageBox(frame(shifted), pkgRects.value), tabW: measureText(k.name, true) + 16 }
   }),
 )
 
@@ -224,7 +226,7 @@ function onItemDown(e: PointerEvent, id: Id) {
 
 /** 直接被拖的節點放開時，中心落在哪個套件框（以拖曳前的框判斷）就屬於哪個套件 */
 function membershipChanges(): [Id, Id | null][] {
-  const pkgs = packages.value.map((k) => k.shifted)
+  const pkgs = packages.value.map((k) => frame(k.shifted))
   return [...draggedNodes.value].flatMap((id): [Id, Id | null][] => {
     const target = packageAt(center(rects.value.get(id)!), pkgs, pkgRects.value)
     const current = props.diagram.packages.find((k) => k.elementIds.includes(id))?.id ?? null
@@ -298,7 +300,7 @@ function onBackgroundClick(p: Point) {
     ed.editing = { kind: 'name', id }
   } else {
     // 套件在最底層且框內不攔截指標（讓框選可從框內開始），點框內空白處在這裡選取套件
-    const k = tool === 'select' ? packageAt(p, props.diagram.packages, rects.value) : null
+    const k = tool === 'select' ? packageAt(p, props.diagram.packages.map(frame), rects.value) : null
     return k ? ed.select(k) : ed.clear()
   }
   ed.tool = 'select'

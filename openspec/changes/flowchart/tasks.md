@@ -2,21 +2,21 @@
 
 ## 1. 資料模型與版本遷移
 
-- [ ] 1.1 依 design D1 修改 `model/types.ts`（`FlowShape`、`FlowNode`、`FlowEdge`、`Subgraph`、`FlowchartDiagram`、`Diagram` 聯集、`version: 3`）；依 D7 將 `addDiagram` 改為 `switch` 支援流程圖、新增 `getFlowchart`、`deleteElement` 改為明確的 class / sequence 分支；驗證 `npx vue-tsc --noEmit` 通過、既有測試全數通過，並新增測試「含流程圖的專案執行 `deleteElement` 不出錯」
-- [ ] 1.2 依 D10 修改 `serialize.ts`：接受版本 1、2、3 並遷移到 3、流程圖結構檢查（含 `shape` 合法值）、箭頭端點與子圖成員的懸空清理；驗證測試涵蓋「版本 2 檔案載入後為版本 3」「版本 1 檔案載入後為版本 3 且類別圖有空陣列」「未知 shape 整份拒絕」「懸空箭頭與子圖成員被略過並產生 warning」「含流程圖的專案往返一致」
+- [x] 1.1 依 design D1 修改 `model/types.ts`（`FlowShape`、`FlowNode`、`FlowEdge`、`Subgraph`、`FlowchartDiagram`、`Diagram` 聯集、`version: 3`）；依 D7 將 `addDiagram` 改為 `switch` 支援流程圖、新增 `getFlowchart`、`deleteElement` 改為明確的 class / sequence 分支；驗證 `npx vue-tsc --noEmit` 通過、既有測試全數通過，並新增測試「含流程圖的專案執行 `deleteElement` 不出錯」
+- [x] 1.2 依 D10 修改 `serialize.ts`：接受版本 1、2、3 並遷移到 3、流程圖結構檢查（含 `shape` 合法值）、箭頭端點與子圖成員的懸空清理；驗證測試涵蓋「版本 2 檔案載入後為版本 3」「版本 1 檔案載入後為版本 3 且類別圖有空陣列」「未知 shape 整份拒絕」「懸空箭頭與子圖成員被略過並產生 warning」「含流程圖的專案往返一致」
 
 ## 2. 版面與路徑（`model/flowLayout.ts`）
 
-- [ ] 2.1 依 D3 實作 `flowNodeBox(node, measure)`；驗證測試涵蓋五種形狀的外框尺寸關係、多行文字撐高、空白文字維持最小尺寸
-- [ ] 2.2 依 D4 實作 `clipToShape`，並提供組合函式產生流程圖箭頭的完整折線（`routeWith` + 首末端貼合）；驗證測試涵蓋每種形狀從上下左右四向進入時端點落在形狀邊上（誤差 < 0.5）、首末段仍為水平或垂直、自動路徑連到菱形時端點為頂點
-- [ ] 2.3 依 D5 實作 `labelPos(points)`、依 D8 實作 `nextNodePos`；驗證測試涵蓋直線 / L 形 / Z 形折線的中點，以及下一步位置在「正下方空」「正下方被佔」「連續三格被佔」時的結果
-- [ ] 2.4 依 D6 將 `classLayout.ts` 的 `packageBox` / `packageAt` 參數放寬為 `{ id, x, y, ids }`，更新類別圖呼叫端；驗證 `classLayout.test.ts` 原有套件測試全數通過，並新增以子圖資料呼叫的測試
+- [x] 2.1 依 D3 實作 `flowNodeBox(node, measure)`；驗證測試涵蓋五種形狀的外框尺寸關係、多行文字撐高、空白文字維持最小尺寸
+- [x] 2.2 依 D4 實作 `clipToShape`，並提供組合函式產生流程圖箭頭的完整折線（`routeWith` + 首末端貼合）；驗證測試涵蓋每種形狀從上下左右四向進入時端點落在形狀邊上（誤差 < 0.5）、首末段仍為水平或垂直、自動路徑連到菱形時端點為頂點
+- [x] 2.3 依 D5 實作 `labelPos(points)`、依 D8 實作 `nextNodePos`；驗證測試涵蓋直線 / L 形 / Z 形折線的中點，以及下一步位置在「正下方空」「正下方被佔」「連續三格被佔」時的結果
+- [x] 2.4 依 D6 將 `classLayout.ts` 的 `packageBox` / `packageAt` 參數放寬為 `{ id, x, y, ids }`，更新類別圖呼叫端；驗證 `classLayout.test.ts` 原有套件測試全數通過，並新增以子圖資料呼叫的測試
 
 ## 3. 流程圖操作（`model/ops.ts`）
 
-- [ ] 3.1 依 D7 新增節點、箭頭、標籤、轉折點、形狀切換操作與 `removeFlowItems`；驗證測試涵蓋「刪除節點連帶刪除所有相連箭頭（含自我迴圈）」「刪除節點後從子圖成員移除」「切換形狀保留文字與箭頭」「重設轉折點後 `bends` 消失」
-- [ ] 3.2 新增子圖操作（新增、改名、`setSubgraphMembership`、刪除保留成員）與 `moveFlowItems`；驗證測試涵蓋「一個節點只屬一個子圖」「移動子圖且成員同時被選取時不重複位移」「刪除子圖保留成員位置」
-- [ ] 3.3 依 D7、D8 新增 `addNextNode`；驗證測試涵蓋新節點為空文字的 process、箭頭從來源指向新節點、位置符合 `nextNodePos`、在單一 `store.apply` 內完成（一次 undo 同時移除節點與箭頭）
+- [x] 3.1 依 D7 新增節點、箭頭、標籤、轉折點、形狀切換操作與 `removeFlowItems`；驗證測試涵蓋「刪除節點連帶刪除所有相連箭頭（含自我迴圈）」「刪除節點後從子圖成員移除」「切換形狀保留文字與箭頭」「重設轉折點後 `bends` 消失」
+- [x] 3.2 新增子圖操作（新增、改名、`setSubgraphMembership`、刪除保留成員）與 `moveFlowItems`；驗證測試涵蓋「一個節點只屬一個子圖」「移動子圖且成員同時被選取時不重複位移」「刪除子圖保留成員位置」
+- [x] 3.3 依 D7、D8 新增 `addNextNode`；驗證測試涵蓋新節點為空文字的 process、箭頭從來源指向新節點、位置符合 `nextNodePos`、在單一 `store.apply` 內完成（一次 undo 同時移除節點與箭頭）
 
 ## 4. 畫面
 

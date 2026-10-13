@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { moveSegment, noteBox, nodeBox, packageAt, packageBox, PKG_PAD, route, routeWith, simplify, type Point, type Rect } from './classLayout'
-import type { Classifier, Package } from './types'
+import { moveSegment, noteBox, nodeBox, packageAt, packageBox, PKG_PAD, route, routeWith, simplify, type Frame, type Point, type Rect } from './classLayout'
+import type { Classifier, Package, Subgraph } from './types'
 
 const measure = (t: string) => t.length * 7
 const box = (x: number, y: number): Rect => ({ x, y, w: 100, h: 60 })
@@ -173,7 +173,10 @@ describe('noteBox', () => {
 })
 
 describe('packageBox / packageAt', () => {
-  const pkg = (over: Partial<Package>): Package => ({ id: 'k', name: 'k', x: 0, y: 0, elementIds: [], ...over })
+  const pkg = (over: Partial<Package>): Frame => {
+    const k: Package = { id: 'k', name: 'k', x: 0, y: 0, elementIds: [], ...over }
+    return { id: k.id, x: k.x, y: k.y, ids: k.elementIds }
+  }
   const rects = new Map([['u', box(300, 300)], ['o', box(1000, 0)]])
 
   it('空套件最小尺寸', () => {
@@ -199,5 +202,12 @@ describe('packageBox / packageAt', () => {
     expect(packageAt({ x: 60, y: 60 }, [lower, upper], rects)).toBe('upper')
     expect(packageAt({ x: 10, y: 10 }, [lower, upper], rects)).toBe('lower')
     expect(packageAt({ x: 900, y: 900 }, [lower, upper], rects)).toBeNull()
+  })
+
+  it('流程圖子圖資料也可直接使用', () => {
+    const g: Subgraph = { id: 'g', title: '後端', x: 0, y: 0, nodeIds: ['u'] }
+    const f: Frame = { id: g.id, x: g.x, y: g.y, ids: g.nodeIds }
+    expect(packageBox(f, rects)).toEqual(packageBox(pkg({ elementIds: ['u'] }), rects))
+    expect(packageAt({ x: 350, y: 330 }, [f], rects)).toBe('g')
   })
 })

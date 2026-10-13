@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, watchEffect } from 'vue'
 import ClassDiagramView from './canvas/class/ClassDiagramView.vue'
+import FlowchartView from './canvas/flowchart/FlowchartView.vue'
 import SequenceDiagramView from './canvas/sequence/SequenceDiagramView.vue'
 import { isTyping } from './canvas/pointer'
 import { useEditorStore } from './store/editor'
@@ -72,7 +73,8 @@ onBeforeUnmount(() => {
         <DiagramTabs />
         <ClassDiagramView v-if="active?.type === 'class'" :key="active.id" :diagram="active" />
         <SequenceDiagramView v-else-if="active?.type === 'sequence'" :key="active.id" :diagram="active" />
-        <div v-else class="empty">用上方「＋類別圖」或「＋循序圖」開始</div>
+        <FlowchartView v-else-if="active?.type === 'flowchart'" :key="active.id" :diagram="active" />
+        <div v-else class="empty">用上方「＋類別圖」「＋循序圖」或「＋流程圖」開始</div>
       </main>
     </div>
   </div>

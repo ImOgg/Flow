@@ -36,7 +36,7 @@ describe('serialize / parseProject', () => {
   })
 
   it('錯誤版本', () => {
-    const r = parseProject(JSON.stringify({ ...sample(), version: 3 }))
+    const r = parseProject(JSON.stringify({ ...sample(), version: 4 }))
     expect(r).toEqual({ ok: false, error: expect.stringContaining('版本') })
   })
 
@@ -75,7 +75,7 @@ describe('serialize / parseProject', () => {
     ])
   })
 
-  it('版本 1 檔案轉為版本 2，類別圖補上空的 notes / packages', () => {
+  it('版本 1 檔案轉為版本 3，類別圖補上空的 notes / packages', () => {
     const p = sample()
     const v1 = JSON.parse(serialize(p))
     v1.version = 1
@@ -86,8 +86,10 @@ describe('serialize / parseProject', () => {
     const r = parseProject(JSON.stringify(v1))
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    expect(r.project.version).toBe(2)
+    expect(r.project.version).toBe(3)
     expect(r.project).toEqual(p)
+    const cd = r.project.diagrams[0]
+    expect(cd.type === 'class' && [cd.notes, cd.packages]).toEqual([[], []])
   })
 
   it('版本 2 缺少 notes / packages 視為結構錯誤', () => {
@@ -131,5 +133,59 @@ describe('serialize / parseProject', () => {
     expect(rcd.packages[0].elementIds).toEqual([user])
     expect(rsd.items.filter((it) => it.kind === 'note')).toEqual([{ kind: 'note', id: 'keep', text: 'a', over: [a] }])
     expect(r.warnings).toHaveLength(4)
+  })
+
+  it('版本 2 檔案載入後為版本 3', () => {
+    const p = sample()
+    const r = parseProject(JSON.stringify({ ...JSON.parse(serialize(p)), version: 2 }))
+    expect(r.ok && r.project).toEqual(p)
+    expect(r.ok && r.project.version).toBe(3)
+  })
+
+  it('含流程圖的專案往返一致', () => {
+    const p = sample()
+    const fc = ops.addDiagram(p, 'flowchart', 'FC')
+    const f = ops.getFlowchart(p, fc)
+    f.nodes.push(
+      { id: 'a', shape: 'terminal', text: '開始', x: 0, y: 0 },
+      { id: 'b', shape: 'decision', text: '金額 > 1000？\n第二行', x: 0, y: 100 },
+      { id: 'c', shape: 'database', text: '', x: 200, y: 100 },
+    )
+    f.edges.push(
+      { id: 'e1', from: 'a', to: 'b', label: '' },
+      { id: 'e2', from: 'b', to: 'c', label: '是', bends: [{ x: 100, y: 120 }, { x: 100, y: 140 }] },
+      { id: 'e3', from: 'c', to: 'c', label: '' },
+    )
+    f.subgraphs.push({ id: 'g', title: '後端', x: 180, y: 60, nodeIds: ['c'] })
+    const r = parseProject(serialize(p))
+    expect(r.ok && r.project).toEqual(p)
+    expect(r.ok && r.warnings).toEqual([])
+  })
+
+  it('流程圖節點 shape 不合法時整份拒絕', () => {
+    const p = sample()
+    ops.getFlowchart(p, ops.addDiagram(p, 'flowchart', 'FC')).nodes.push({ id: 'a', shape: 'hexagon' as 'process', text: '', x: 0, y: 0 })
+    expect(parseProject(serialize(p))).toEqual({ ok: false, error: expect.any(String) })
+  })
+
+  it('流程圖缺少 subgraphs 視為結構錯誤', () => {
+    const p = JSON.parse(serialize(sample()))
+    p.diagrams.push({ id: 'f', type: 'flowchart', name: 'FC', nodes: [], edges: [] })
+    expect(parseProject(JSON.stringify(p)).ok).toBe(false)
+  })
+
+  it('懸空箭頭與子圖成員被略過並產生 warning', () => {
+    const p = sample()
+    const f = ops.getFlowchart(p, ops.addDiagram(p, 'flowchart', 'FC'))
+    f.nodes.push({ id: 'a', shape: 'process', text: '', x: 0, y: 0 })
+    f.edges.push({ id: 'keep', from: 'a', to: 'a', label: '' }, { id: 'drop', from: 'a', to: 'ghost', label: '' })
+    f.subgraphs.push({ id: 'g', title: 'G', x: 0, y: 0, nodeIds: ['ghost', 'a'] })
+    const r = parseProject(serialize(p))
+    if (!r.ok) throw new Error(r.error)
+    const rf = r.project.diagrams[2]
+    if (rf.type !== 'flowchart') throw new Error()
+    expect(rf.edges.map((e) => e.id)).toEqual(['keep'])
+    expect(rf.subgraphs[0].nodeIds).toEqual(['a'])
+    expect(r.warnings).toHaveLength(2)
   })
 })
