@@ -1,4 +1,7 @@
+import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it } from 'vitest'
+import { useProjectStore } from '../store/project'
+import { flowNodeBox, nextNodePos } from './flowLayout'
 import * as ops from './ops'
 import type { Message, Project, SeqItem } from './types'
 
@@ -77,6 +80,13 @@ describe('關係與連鎖刪除', () => {
     expect(cls(p, cd2).nodes).toHaveLength(2)
     ops.deleteRelation(p, rel)
     expect(cls(p, cd1).edges).toEqual([])
+  })
+
+  it('含流程圖的專案執行 deleteElement 不出錯', () => {
+    const { p, user } = setup()
+    const fc = ops.addDiagram(p, 'flowchart', 'FC')
+    expect(() => ops.deleteElement(p, user)).not.toThrow()
+    expect(ops.getFlowchart(p, fc)).toMatchObject({ nodes: [], edges: [], subgraphs: [] })
   })
 })
 
@@ -390,5 +400,182 @@ describe('循序圖', () => {
     const f = ops.wrapInFragment(p, sd, [m1], 'loop')!
     ops.moveItem(p, sd, m2, { container: { fragmentId: f, operand: 0 }, index: 0 })
     expect(shape(seq(p, sd).items)).toBe('loop(m2 m1)')
+  })
+})
+
+describe('流程圖', () => {
+  const measure = (t: string) => t.length * 7
+  function fc() {
+    const p = ops.emptyProject()
+    const d = ops.addDiagram(p, 'flowchart', 'FC')
+    const f = () => ops.getFlowchart(p, d)
+    return { p, d, f }
+  }
+
+  it('刪除節點連帶刪除所有相連箭頭（含自我迴圈），其餘保留', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 0, 0)
+    const b = ops.addFlowNode(p, d, 'decision', 0, 100)
+    const c = ops.addFlowNode(p, d, 'terminal', 0, 200)
+    ops.addFlowEdge(p, d, a, b)
+    ops.addFlowEdge(p, d, b, c, '是')
+    ops.addFlowEdge(p, d, b, b)
+    const keep = ops.addFlowEdge(p, d, a, c)
+    ops.removeFlowItems(p, d, [b])
+    expect(f().nodes.map((n) => n.id)).toEqual([a, c])
+    expect(f().edges.map((e) => e.id)).toEqual([keep])
+  })
+
+  it('刪除節點後從子圖成員移除，子圖保留', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 0, 0)
+    const b = ops.addFlowNode(p, d, 'process', 0, 100)
+    const g = ops.addSubgraph(p, d, 0, 0)
+    ops.setSubgraphMembership(p, d, a, g)
+    ops.setSubgraphMembership(p, d, b, g)
+    ops.removeFlowItems(p, d, [a])
+    expect(f().subgraphs).toEqual([expect.objectContaining({ id: g, nodeIds: [b] })])
+  })
+
+  it('刪除箭頭只移除箭頭', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 0, 0)
+    const e = ops.addFlowEdge(p, d, a, a)
+    ops.removeFlowItems(p, d, [e])
+    expect([f().nodes.length, f().edges.length]).toEqual([1, 0])
+  })
+
+  it('切換形狀保留文字、位置與箭頭', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 10, 20, '審核')
+    const b = ops.addFlowNode(p, d, 'process', 0, 100)
+    const c = ops.addFlowNode(p, d, 'process', 0, 200)
+    ops.addFlowEdge(p, d, b, a)
+    ops.addFlowEdge(p, d, a, c)
+    ops.setFlowNodeShape(p, d, a, 'decision')
+    expect(f().nodes[0]).toEqual({ id: a, shape: 'decision', text: '審核', x: 10, y: 20 })
+    expect(f().edges).toHaveLength(2)
+  })
+
+  it('文字與標籤修改', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'io', 0, 0)
+    const e = ops.addFlowEdge(p, d, a, a, '是')
+    ops.setFlowNodeText(p, d, a, '輸入\n金額')
+    ops.setFlowEdgeLabel(p, d, e, '通過')
+    expect(f().nodes[0].text).toBe('輸入\n金額')
+    expect(f().edges[0].label).toBe('通過')
+  })
+
+  it('設定與重設轉折點', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 0, 0)
+    const b = ops.addFlowNode(p, d, 'process', 300, 0)
+    const e = ops.addFlowEdge(p, d, a, b)
+    ops.setFlowEdgeBends(p, d, e, [{ x: 150, y: 0 }, { x: 150, y: 80 }])
+    expect(f().edges[0].bends).toHaveLength(2)
+    ops.resetFlowEdgeBends(p, d, e)
+    expect('bends' in f().edges[0]).toBe(false)
+  })
+
+  it('子圖改名；一個節點只屬一個子圖，null 表示離開', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 0, 0)
+    const g1 = ops.addSubgraph(p, d, 0, 0)
+    const g2 = ops.addSubgraph(p, d, 300, 0)
+    ops.renameSubgraph(p, d, g1, '後端')
+    ops.setSubgraphMembership(p, d, a, g1)
+    ops.setSubgraphMembership(p, d, a, g2)
+    expect(f().subgraphs.map((g) => [g.title, g.nodeIds])).toEqual([['後端', []], ['子圖', [a]]])
+    ops.setSubgraphMembership(p, d, a, null)
+    expect(f().subgraphs.flatMap((g) => g.nodeIds)).toEqual([])
+  })
+
+  it('移動子圖連同成員；成員同時被選取時不重複位移', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 0, 0)
+    const b = ops.addFlowNode(p, d, 'process', 0, 100)
+    const out = ops.addFlowNode(p, d, 'process', 500, 0)
+    const g = ops.addSubgraph(p, d, -20, -40)
+    ops.setSubgraphMembership(p, d, a, g)
+    ops.setSubgraphMembership(p, d, b, g)
+    ops.moveFlowItems(p, d, [g, a], 100, 10)
+    expect(f().nodes.map((n) => [n.x, n.y])).toEqual([[100, 10], [100, 110], [500, 0]])
+    expect(f().subgraphs[0]).toMatchObject({ x: 80, y: -30 })
+    expect(out).toBeTruthy()
+  })
+
+  it('刪除子圖保留成員位置', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'process', 30, 40)
+    const g = ops.addSubgraph(p, d, 0, 0)
+    ops.setSubgraphMembership(p, d, a, g)
+    ops.removeFlowItems(p, d, [g])
+    expect(f().subgraphs).toEqual([])
+    expect(f().nodes).toEqual([expect.objectContaining({ id: a, x: 30, y: 40 })])
+  })
+
+  it('addNextNode：空白處理節點、箭頭指向新節點、位置符合 nextNodePos', () => {
+    const { p, d, f } = fc()
+    const a = ops.addFlowNode(p, d, 'terminal', 0, 0, '開始')
+    const n1 = ops.addNextNode(p, d, a, measure)!
+    const src = f().nodes[0]
+    const srcBox = flowNodeBox(src, measure)
+    const size = flowNodeBox({ shape: 'process', text: '' }, measure)
+    const node1 = f().nodes.find((n) => n.id === n1)!
+    expect(node1).toMatchObject({ shape: 'process', text: '' })
+    expect({ x: node1.x, y: node1.y }).toEqual(nextNodePos({ ...src, ...srcBox }, size, [{ ...src, ...srcBox }]))
+    expect(f().edges).toEqual([expect.objectContaining({ from: a, to: n1, label: '' })])
+    // 正下方已被 n1 佔住：第二個往右錯開
+    const n2 = ops.addNextNode(p, d, a, measure)!
+    const node2 = f().nodes.find((n) => n.id === n2)!
+    expect(node2.y).toBe(node1.y)
+    expect(node2.x).toBeGreaterThan(node1.x + size.w)
+  })
+
+  it('addNextNode 在單一 store.apply 內完成：一次 undo 同時移除節點與箭頭', () => {
+    setActivePinia(createPinia())
+    const s = useProjectStore()
+    const { d, a } = s.apply((p) => {
+      const d = ops.addDiagram(p, 'flowchart', 'FC')
+      return { d, a: ops.addFlowNode(p, d, 'process', 0, 0) }
+    })
+    s.apply((p) => ops.addNextNode(p, d, a, measure))
+    expect(ops.getFlowchart(s.project, d).nodes).toHaveLength(2)
+    s.undo()
+    const f = ops.getFlowchart(s.project, d)
+    expect([f.nodes.length, f.edges.length]).toEqual([1, 0])
+  })
+})
+
+describe('套件與子圖框大小', () => {
+  it('套件：設定、移動保留、重設；成員不變', () => {
+    const { p, user, cd1 } = setup()
+    ops.addNode(p, cd1, user, 0, 0)
+    const k = ops.addPackage(p, cd1, 0, 0)
+    ops.setPackageMembership(p, cd1, user, k)
+    ops.setPackageSize(p, cd1, k, 400, 300)
+    expect(cls(p, cd1).packages[0]).toMatchObject({ w: 400, h: 300, elementIds: [user] })
+    ops.moveItems(p, cd1, [k], 100, 50)
+    expect(cls(p, cd1).packages[0]).toMatchObject({ x: 100, y: 50, w: 400, h: 300 })
+    ops.resetPackageSize(p, cd1, k)
+    const pkg = cls(p, cd1).packages[0]
+    expect('w' in pkg || 'h' in pkg).toBe(false)
+    expect(pkg.elementIds).toEqual([user])
+  })
+
+  it('子圖：設定、移動保留、重設；成員不變', () => {
+    const p = ops.emptyProject()
+    const d = ops.addDiagram(p, 'flowchart', 'FC')
+    const n = ops.addFlowNode(p, d, 'process', 0, 0)
+    const g = ops.addSubgraph(p, d, 0, 0)
+    ops.setSubgraphMembership(p, d, n, g)
+    ops.setSubgraphSize(p, d, g, 500, 200)
+    ops.moveFlowItems(p, d, [g], 10, 20)
+    expect(ops.getFlowchart(p, d).subgraphs[0]).toMatchObject({ x: 10, y: 20, w: 500, h: 200, nodeIds: [n] })
+    ops.resetSubgraphSize(p, d, g)
+    const sg = ops.getFlowchart(p, d).subgraphs[0]
+    expect('w' in sg || 'h' in sg).toBe(false)
+    expect(sg.nodeIds).toEqual([n])
   })
 })

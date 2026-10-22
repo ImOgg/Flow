@@ -1,9 +1,11 @@
 // 編輯器的暫時狀態：選取、工具、行內編輯。不進復原紀錄、不存檔
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ClassifierKind, Id, RelationKind } from '../model/types'
+import type { ClassifierKind, FlowShape, Id, RelationKind } from '../model/types'
 
 export type ClassTool = 'select' | ClassifierKind | RelationKind | 'note' | 'noteLink' | 'package'
+/** 流程圖工具：形狀 = 放置該形狀的節點；select 與類別圖共用 */
+export type FlowTool = FlowShape | 'edge' | 'subgraph'
 
 export type Editing =
   | { kind: 'name'; id: Id }
@@ -13,13 +15,14 @@ export type Editing =
   | { kind: 'guard'; id: Id; operand: number }
   | { kind: 'note'; id: Id } // 類別圖或循序圖的 Note
   | { kind: 'package'; id: Id }
+  | { kind: 'flowNode' | 'edgeLabel' | 'subgraph'; id: Id } // 流程圖
 
 export const useEditorStore = defineStore('editor', () => {
   const activeDiagramId = ref<Id | null>(null)
   const selection = ref<Id[]>([])
   /** 循序圖中被點選的片段區段，作為快速輸入的插入目標 */
   const operand = ref<{ fragmentId: Id; operand: number } | null>(null)
-  const tool = ref<ClassTool>('select')
+  const tool = ref<ClassTool | FlowTool>('select')
   const editing = ref<Editing | null>(null)
 
   function select(id: Id | null, additive = false) {

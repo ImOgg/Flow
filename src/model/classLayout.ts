@@ -1,5 +1,5 @@
 // 類別圖框尺寸與連線路徑。文字量測以參數注入，方便在沒有 DOM 的測試環境使用
-import type { Classifier, Id, Package, Point } from './types'
+import type { Classifier, Id, Point } from './types'
 import { formatAttribute, formatOperation } from './quickInput'
 
 export type Measure = (text: string, bold?: boolean) => number
@@ -158,16 +158,19 @@ export function moveSegment(pts: Point[], i: number, d: number): Point[] {
 
 export const PKG_PAD = 16
 export const PKG_TAB_H = 22
-const PKG_MIN_W = 160
-const PKG_MIN_H = 100
+export const PKG_MIN_W = 160
+export const PKG_MIN_H = 100
 
-/** 套件框 = {x, y, 最小尺寸} 與所有成員框（外擴邊距、上方留標籤高度）的聯集 */
-export function packageBox(k: Package, rects: Map<Id, Rect>): Rect {
+/** 套件框與流程圖子圖框共用的資料形狀：ids 為成員 id，w / h 為手動指定的最小寬高 */
+export interface Frame { id: Id; x: number; y: number; w?: number; h?: number; ids: Id[] }
+
+/** 套件框 = {x, y, 最小尺寸（手動大小不小於預設）} 與所有成員框（外擴邊距、上方留標籤高度）的聯集 */
+export function packageBox(k: Frame, rects: Map<Id, Rect>): Rect {
   let x1 = k.x
   let y1 = k.y
-  let x2 = k.x + PKG_MIN_W
-  let y2 = k.y + PKG_MIN_H
-  for (const id of k.elementIds) {
+  let x2 = k.x + Math.max(PKG_MIN_W, k.w ?? PKG_MIN_W)
+  let y2 = k.y + Math.max(PKG_MIN_H, k.h ?? PKG_MIN_H)
+  for (const id of k.ids) {
     const r = rects.get(id)
     if (!r) continue
     x1 = Math.min(x1, r.x - PKG_PAD)
@@ -179,7 +182,7 @@ export function packageBox(k: Package, rects: Map<Id, Rect>): Rect {
 }
 
 /** 點落在哪個套件框內；重疊時取最上層（陣列後者） */
-export function packageAt(p: Point, packages: Package[], rects: Map<Id, Rect>): Id | null {
+export function packageAt(p: Point, packages: Frame[], rects: Map<Id, Rect>): Id | null {
   for (let i = packages.length - 1; i >= 0; i--) {
     const r = packageBox(packages[i], rects)
     if (inRange(p.x, r.x, r.w) && inRange(p.y, r.y, r.h)) return packages[i].id

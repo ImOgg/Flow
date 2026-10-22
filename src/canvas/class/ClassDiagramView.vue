@@ -5,17 +5,20 @@ import {
   noteBox,
   packageAt,
   packageBox,
+  PKG_MIN_H,
+  PKG_MIN_W,
   PKG_TAB_H,
   routeWith,
   moveSegment,
+  type Frame,
   type NodeBox,
   type Point,
   type Rect,
 } from '../../model/classLayout'
 import * as ops from '../../model/ops'
-import type { ClassDiagram, ClassifierKind, Id, RelationKind } from '../../model/types'
+import type { ClassDiagram, ClassifierKind, Id, Package, RelationKind } from '../../model/types'
 import { exportPng, exportSvg } from '../../io/export'
-import { useEditorStore, type ClassTool } from '../../store/editor'
+import { useEditorStore, type ClassTool, type FlowTool } from '../../store/editor'
 import { useProjectStore } from '../../store/project'
 import Canvas from '../Canvas.vue'
 import InlineInput from '../InlineInput.vue'
@@ -45,8 +48,8 @@ const RELATION_TOOLS: [RelationKind, string][] = [
   ['aggregation', '聚合'],
   ['composition', '組合'],
 ]
-const isClassifierTool = (t: ClassTool): t is ClassifierKind => CLASSIFIER_TOOLS.some(([k]) => k === t)
-const isRelationTool = (t: ClassTool): t is RelationKind => RELATION_TOOLS.some(([k]) => k === t)
+const isClassifierTool = (t: ClassTool | FlowTool): t is ClassifierKind => CLASSIFIER_TOOLS.some(([k]) => k === t)
+const isRelationTool = (t: ClassTool | FlowTool): t is RelationKind => RELATION_TOOLS.some(([k]) => k === t)
 
 // 拖曳中的暫時位移，放開才寫回 store。ids 可混合節點、Note、套件
 const drag = ref<{ ids: Set<Id>; dx: number; dy: number } | null>(null)
@@ -62,6 +65,7 @@ const movingNodes = computed(() => {
   if (d) for (const k of props.diagram.packages) if (d.ids.has(k.id)) k.elementIds.forEach((el) => s.add(el))
   return s
 })
+const frame = (k: Package): Frame => ({ id: k.id, x: k.x, y: k.y, w: k.w, h: k.h, ids: k.elementIds })
 const shift = <T extends Point>(o: T, moving: boolean): T =>
   moving && drag.value ? { ...o, x: o.x + drag.value.dx, y: o.y + drag.value.dy } : o
 
@@ -105,8 +109,9 @@ const noteRects = computed(() => new Map(notes.value.map((n) => [n.note.id, { x:
 /** 套件：shifted 為套用拖曳位移後的資料，box 由成員撐開 */
 const packages = computed(() =>
   props.diagram.packages.map((k) => {
-    const shifted = shift(k, !!drag.value?.ids.has(k.id))
-    return { pkg: k, shifted, box: packageBox(shifted, pkgRects.value), tabW: measureText(k.name, true) + 16 }
+    const moved = shift(k, !!drag.value?.ids.has(k.id))
+    const shifted = resize.value?.id === k.id ? { ...moved, w: resize.value.w, h: resize.value.h } : moved
+    return { pkg: k, shifted, box: packageBox(frame(shifted), pkgRects.value), tabW: measureText(k.name, true) + 16 }
   }),
 )
 
@@ -224,7 +229,7 @@ function onItemDown(e: PointerEvent, id: Id) {
 
 /** 直接被拖的節點放開時，中心落在哪個套件框（以拖曳前的框判斷）就屬於哪個套件 */
 function membershipChanges(): [Id, Id | null][] {
-  const pkgs = packages.value.map((k) => k.shifted)
+  const pkgs = packages.value.map((k) => frame(k.shifted))
   return [...draggedNodes.value].flatMap((id): [Id, Id | null][] => {
     const target = packageAt(center(rects.value.get(id)!), pkgs, pkgRects.value)
     const current = props.diagram.packages.find((k) => k.elementIds.includes(id))?.id ?? null
@@ -270,6 +275,40 @@ function onSegmentDown(e: PointerEvent, id: Id, i: number) {
   )
 }
 
+// ---------- 套件調整大小 ----------
+// 拖曳把手中的預覽大小（同 bendDrag 用 shallowRef）
+const resize = shallowRef<{ id: Id; w: number; h: number } | null>(null)
+
+/** 只選取一個套件時才顯示右下角把手 */
+const resizable = computed(() =>
+  ed.selection.length === 1 ? packages.value.find((x) => x.pkg.id === ed.selection[0]) : undefined,
+)
+
+/** 把手拖到哪裡，最小寬高就是游標到錨點 (x, y) 的距離（不小於預設）；放開一次寫入 */
+function onResizeDown(e: PointerEvent, id: Id) {
+  if (e.button !== 0) return
+  e.stopPropagation()
+  const k = props.diagram.packages.find((x) => x.id === id)
+  if (!k) return
+  trackPointer(
+    e,
+    (m) => {
+      const p = world(m)
+      resize.value = { id, w: Math.max(PKG_MIN_W, Math.round(p.x - k.x)), h: Math.max(PKG_MIN_H, Math.round(p.y - k.y)) }
+    },
+    () => {
+      const r = resize.value
+      resize.value = null
+      if (r && (r.w !== k.w || r.h !== k.h)) store.apply((p) => ops.setPackageSize(p, dId(), id, r.w, r.h))
+    },
+  )
+}
+
+function resetSize(id: Id) {
+  const k = props.diagram.packages.find((x) => x.id === id)
+  if (k?.w !== undefined || k?.h !== undefined) store.apply((p) => ops.resetPackageSize(p, dId(), id))
+}
+
 function resetEdge(id: Id) {
   if (props.diagram.edges.find((e) => e.relationId === id)?.bends) {
     store.apply((p) => ops.resetEdgeBends(p, dId(), id))
@@ -298,7 +337,7 @@ function onBackgroundClick(p: Point) {
     ed.editing = { kind: 'name', id }
   } else {
     // 套件在最底層且框內不攔截指標（讓框選可從框內開始），點框內空白處在這裡選取套件
-    const k = tool === 'select' ? packageAt(p, props.diagram.packages, rects.value) : null
+    const k = tool === 'select' ? packageAt(p, props.diagram.packages.map(frame), rects.value) : null
     return k ? ed.select(k) : ed.clear()
   }
   ed.tool = 'select'
@@ -425,7 +464,7 @@ const isEmpty = computed(() => !props.diagram.nodes.length && !props.diagram.not
       <template v-else-if="ed.tool === 'noteLink'">從 Note 拖曳到要說明的元素</template>
       <template v-else-if="ed.tool === 'package'">點擊畫布放置套件；把類別拖進框內加入、拖出框外離開</template>
       <template v-else>
-        雙擊名稱改名、雙擊區塊新增成員（例：- name: string、+ login(id: string): bool）；選取連線後拖曳控制點調整路徑、雙擊連線重設；拖曳套件標籤整組移動；Delete 從圖移除
+        雙擊名稱改名、雙擊區塊新增成員（例：- name: string、+ login(id: string): bool）；選取連線後拖曳控制點調整路徑、雙擊連線重設；拖曳套件標籤整組移動、拖曳右下角把手調整大小（雙擊把手重設）；Delete 從圖移除
       </template>
     </div>
     <div
@@ -516,6 +555,20 @@ const isEmpty = computed(() => !props.diagram.nodes.length && !props.diagram.not
           :selected="highlighted(n.note.id)"
           @down="onItemDown($event, n.note.id)"
           @edit="ed.editing = { kind: 'note', id: n.note.id }"
+        />
+        <!-- 選取中套件的調整大小把手 -->
+        <rect
+          v-if="resizable"
+          :x="resizable.box.x + resizable.box.w - 4"
+          :y="resizable.box.y + resizable.box.h - 4"
+          width="8"
+          height="8"
+          fill="#fff"
+          stroke="#1a73e8"
+          style="cursor: nwse-resize"
+          data-export="false"
+          @pointerdown="onResizeDown($event, resizable.pkg.id)"
+          @dblclick.stop="resetSize(resizable.pkg.id)"
         />
         <!-- 選取中連線的線段控制點：畫在最上層，避免靠近邊框的短線段被類別框蓋住 -->
         <template v-for="e in edges" :key="`handles-${e.id}`">

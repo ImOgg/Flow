@@ -17,9 +17,12 @@ function activate(id: Id) {
   ed.activeDiagramId = id
 }
 
+const TYPE_NAME: Record<Diagram['type'], string> = { class: '類別圖', sequence: '循序圖', flowchart: '流程圖' }
+const TYPE_ICON: Record<Diagram['type'], string> = { class: '類', sequence: '序', flowchart: '流' }
+
 function add(type: Diagram['type']) {
   const n = store.project.diagrams.filter((d) => d.type === type).length + 1
-  const id = store.apply((p) => ops.addDiagram(p, type, `${type === 'class' ? '類別圖' : '循序圖'} ${n}`))
+  const id = store.apply((p) => ops.addDiagram(p, type, `${TYPE_NAME[type]} ${n}`))
   activate(id)
 }
 
@@ -56,7 +59,7 @@ function remove(d: Diagram) {
       @click="activate(d.id)"
       @dblclick="startRename(d)"
     >
-      <span class="type">{{ d.type === 'class' ? '類' : '序' }}</span>
+      <span class="type">{{ TYPE_ICON[d.type] }}</span>
       <input
         v-if="renaming === d.id"
         ref="input"
@@ -70,6 +73,7 @@ function remove(d: Diagram) {
     </div>
     <button class="add" @click="add('class')">＋類別圖</button>
     <button class="add" @click="add('sequence')">＋循序圖</button>
+    <button class="add" @click="add('flowchart')">＋流程圖</button>
   </div>
 </template>
 

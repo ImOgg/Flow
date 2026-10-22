@@ -1,8 +1,10 @@
-import type { Id, Project, SeqItem } from './types'
+import type { FlowShape, Id, Project, SeqItem } from './types'
 
 export const serialize = (p: Project) => JSON.stringify(p, null, 2)
 
 export type ParseResult = { ok: true; project: Project; warnings: string[] } | { ok: false; error: string }
+
+const SHAPES: FlowShape[] = ['process', 'decision', 'terminal', 'io', 'database']
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -15,7 +17,7 @@ export function parseProject(text: string): ParseResult {
     return { ok: false, error: '檔案不是有效的 JSON' }
   }
   if (!isObj(data)) return { ok: false, error: '檔案內容不是專案物件' }
-  if (data.version !== 1 && data.version !== 2) return { ok: false, error: `不支援的檔案版本：${String(data.version)}` }
+  if (data.version !== 1 && data.version !== 2 && data.version !== 3) return { ok: false, error: `不支援的檔案版本：${String(data.version)}` }
   if (!isObj(data.model) || !isObj(data.model.elements) || !isObj(data.model.relations) || !Array.isArray(data.diagrams)) {
     return { ok: false, error: '專案結構不完整（缺少 model 或 diagrams）' }
   }
@@ -29,6 +31,8 @@ export function parseProject(text: string): ParseResult {
     }
     data.version = 2
   }
+  // 版本 2 → 3：只新增流程圖，舊檔不含流程圖
+  if (data.version === 2) data.version = 3
   const diagramsOk = data.diagrams.every(
     (d) =>
       isObj(d) &&
@@ -37,12 +41,26 @@ export function parseProject(text: string): ParseResult {
         Array.isArray(d.edges) &&
         Array.isArray(d.notes) &&
         Array.isArray(d.packages)) ||
-        (d.type === 'sequence' && Array.isArray(d.lifelines) && Array.isArray(d.items))),
+        (d.type === 'sequence' && Array.isArray(d.lifelines) && Array.isArray(d.items)) ||
+        (d.type === 'flowchart' &&
+          Array.isArray(d.nodes) &&
+          Array.isArray(d.edges) &&
+          Array.isArray(d.subgraphs) &&
+          d.nodes.every((n) => isObj(n) && SHAPES.includes(n.shape as FlowShape)))),
   )
   if (!diagramsOk) return { ok: false, error: '圖的結構不正確' }
 
   const p = data as unknown as Project
   const warnings: string[] = []
+  /** 框的手動大小：不是有限正數就略過該欄位（回到自動大小） */
+  const checkSize = (k: { w?: unknown; h?: unknown }, label: string) => {
+    for (const key of ['w', 'h'] as const) {
+      const v = k[key]
+      if (v === undefined || (typeof v === 'number' && Number.isFinite(v) && v > 0)) continue
+      delete k[key]
+      warnings.push(`${label} 的 ${key} 不是有效的大小，已略過`)
+    }
+  }
   const { elements, relations } = p.model
 
   for (const r of Object.values(relations)) {
@@ -71,7 +89,22 @@ export function parseProject(text: string): ParseResult {
         })
       for (const n of d.notes) n.links = keep(n.links, '註解連結')
       for (const k of d.packages) k.elementIds = keep(k.elementIds, `套件 ${k.name} `)
-    } else {
+      for (const k of d.packages) checkSize(k, `「${d.name}」套件 ${k.name}`)
+    } else if (d.type === 'flowchart') {
+      const nodes = new Set(d.nodes.map((n) => n.id))
+      d.edges = d.edges.filter((e) => {
+        const ok = nodes.has(e.from) && nodes.has(e.to)
+        if (!ok) warnings.push(`「${d.name}」略過端點不存在的箭頭 ${e.id}`)
+        return ok
+      })
+      for (const g of d.subgraphs) {
+        g.nodeIds = g.nodeIds.filter((id) => {
+          if (!nodes.has(id)) warnings.push(`「${d.name}」子圖 ${g.title} 略過不存在的節點 ${id}`)
+          return nodes.has(id)
+        })
+        checkSize(g, `「${d.name}」子圖 ${g.title}`)
+      }
+    } else if (d.type === 'sequence') {
       for (const l of d.lifelines) {
         if (l.elementId && !elements[l.elementId]) {
           delete l.elementId
