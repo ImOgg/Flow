@@ -49,6 +49,13 @@
   - 能不能順便記住上次開的檔案：`FileSystemFileHandle` 存不進 localStorage，要用 IndexedDB，重新開啟時瀏覽器會再要一次權限
 - 注意：localStorage 寫入失敗（超過容量、無痕模式）時要 try/catch，不能影響編輯；載回時解析失敗就忽略暫存
 
+## Code Review（2026-10-23 許願）
+
+- **整體 code review**：目前程式碼大多沒有實際看過，需要完整檢視一次
+- 用 `antfu` skill 對照 Anthony Fu 的慣例（ESLint 設定、專案結構、寫法）來優化
+- 可搭配 `vue`、`pinia`、`vite` skill 檢查各自的用法
+- 建議分模組進行（`model/`、`store/`、`canvas/`、`ui/`、`io/`），每次一塊，邊看邊理解
+
 ## 其他
 
 - README 註明用 Chrome / Edge 開啟；VS Code 內建瀏覽器無法取得寫入權限，存檔會失敗
