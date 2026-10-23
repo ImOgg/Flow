@@ -56,7 +56,5 @@
 ## 第一期刻意延後的功能（見 proposal）
 
 - 架構圖
-- 循序圖 activation bar
-- Note
 - Tauri 桌面包裝
 - 從程式碼反向產生類別圖
