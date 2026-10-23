@@ -13,17 +13,12 @@
   - 圖上 Delete 只會隱藏連線；拉錯的關係會留在模型，之後放上同兩個元素時自動出現
   - 建議：選取連線按 Shift+Delete 從模型刪除
 - **模型樹標出沒放在任何圖上的元素**（例如淡色顯示）
-- **Package 可調整大小**（2026-10-13 許願）→ 已開 change：`openspec/changes/package-resize`（含流程圖子圖框；待 `flowchart` 歸檔後實作）
-  - 目前框大小 = 最小尺寸與成員範圍的聯集，無法手動放大（例如先拉大框再把類別放進去）
-  - 建議做法：Package 加選填的 `w` / `h`，`packageBox` 的最小尺寸改用它（沒有就用預設 160 × 100）；選取時右下角出現拖曳把手，放開才寫入，一次拖曳 = 一筆復原
-  - 框永遠不會小於成員範圍（仍取聯集），所以縮小不會把成員擠出去，也不會影響成員判定
-  - 流程圖子圖也共用 `packageBox`（`Frame`），可以一起支援
-  - 檔案格式：`w` / `h` 是選填欄位，舊檔不受影響；要不要升版本號，開 change 時再決定
 
 ## Mermaid 轉換（2026-10-08 許願）
 
 - **匯出 Mermaid**：把目前的類別圖／循序圖輸出成 `classDiagram`／`sequenceDiagram` 文字，複製後可直接貼進 Markdown
 - **貼上 Mermaid 匯入**：貼上 Mermaid 文字，解析後建立對應的模型元素與圖
+  - 流程圖已完成（2026-10-22，`mermaid-flowchart-import`）；類別圖、循序圖待做
 - 注意：Mermaid 不存版面座標，匯入時需自動排版；匯出會遺失手動調整的位置
 - 建議先做匯出（模型 → 文字，單向、簡單），匯入（要寫 parser）另外排
 - 與流程圖／架構圖一起規劃：流程圖對應 Mermaid `flowchart`，架構圖可用 `flowchart` + subgraph（或 `architecture-beta`）；轉換層設計成「每種圖一個轉換器」，之後新增圖種時順便補上
@@ -60,8 +55,8 @@
 
 ## 第一期刻意延後的功能（見 proposal）
 
-- 流程圖、架構圖
+- 架構圖
 - 循序圖 activation bar
-- Package、Note
+- Note
 - Tauri 桌面包裝
 - 從程式碼反向產生類別圖

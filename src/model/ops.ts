@@ -21,8 +21,9 @@ import type {
   SeqItem,
   SequenceDiagram,
 } from './types'
-import type { Measure } from './classLayout'
-import { flowNodeBox, nextNodePos } from './flowLayout'
+import type { MermaidFlow } from '../io/mermaid'
+import { PKG_PAD, PKG_TAB_H, type Measure } from './classLayout'
+import { flowNodeBox, layerLayout, nextNodePos } from './flowLayout'
 
 export const newId = (): Id => crypto.randomUUID()
 
@@ -356,6 +357,36 @@ export function addNextNode(p: Project, diagramId: Id, fromId: Id, measure: Meas
   const id = addFlowNode(p, diagramId, 'process', pos.x, pos.y)
   addFlowEdge(p, diagramId, fromId, id)
   return id
+}
+
+/**
+ * 由 Mermaid 解析結果建立新流程圖，回傳圖 id。Mermaid id 只用來對照，不進專案檔；
+ * 找不到端點的箭頭略過，沒有成員的子圖不建立
+ */
+export function importFlowchart(p: Project, flow: MermaidFlow, measure: Measure): Id {
+  const diagramId = addDiagram(p, 'flowchart', flow.title ?? '匯入的流程圖')
+  const sizes = flow.nodes.map((n) => ({ id: n.id, ...flowNodeBox(n, measure) }))
+  const pos = layerLayout(sizes, flow.edges, flow.direction)
+  const ids = new Map<string, Id>()
+  for (const n of flow.nodes) {
+    const at = pos.get(n.id)!
+    ids.set(n.id, addFlowNode(p, diagramId, n.shape, at.x, at.y, n.text))
+  }
+  for (const e of flow.edges) {
+    const from = ids.get(e.from)
+    const to = ids.get(e.to)
+    if (from && to) addFlowEdge(p, diagramId, from, to, e.label)
+  }
+  for (const g of flow.subgraphs) {
+    const members = g.nodeIds.filter((m) => ids.has(m))
+    if (!members.length) continue
+    // 讓 packageBox 的框剛好從成員左上角開始，不被 {x, y} 往外撐大
+    const x = Math.min(...members.map((m) => pos.get(m)!.x)) - PKG_PAD
+    const y = Math.min(...members.map((m) => pos.get(m)!.y)) - PKG_PAD - PKG_TAB_H
+    const sg = addSubgraph(p, diagramId, x, y, g.title)
+    for (const m of members) setSubgraphMembership(p, diagramId, ids.get(m)!, sg)
+  }
+  return diagramId
 }
 
 // ---------- 循序圖：生命線 ----------
