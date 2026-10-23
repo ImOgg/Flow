@@ -39,15 +39,9 @@
 
 ## 瀏覽器自動暫存（2026-10-22 許願）
 
-- **目的**：重新整理或關掉分頁後再開，自動回到上次的內容，不用每次都手動存檔
-- 用 localStorage，不用 cookie：cookie 只有約 4KB 而且每次 request 都會帶出去；localStorage 約 5MB，只留在本機
-- 建議做法：`store.project` 變更時（debounce 約 1 秒）把 `serialize(project)` 寫進 localStorage；啟動時有暫存就用 `parseProject` 載回，沒有才用 `emptyProject()`
-- 暫存只是保險，不取代存檔：檔案仍是正式來源，標題的未儲存標記（●）照舊
-- 要決定的事：
-  - 載回時要直接還原，還是先問「要還原上次未儲存的內容嗎？」
-  - 開啟檔案後暫存要不要一起換成該檔案內容（建議要，暫存永遠 = 目前畫面）
-  - 能不能順便記住上次開的檔案：`FileSystemFileHandle` 存不進 localStorage，要用 IndexedDB，重新開啟時瀏覽器會再要一次權限
-- 注意：localStorage 寫入失敗（超過容量、無痕模式）時要 try/catch，不能影響編輯；載回時解析失敗就忽略暫存
+- 自動暫存已完成（2026-10-23，`browser-autosave`），以下為延後項目
+- **記住上次開的檔案**：目前還原後沒有檔名，第一次存檔會要求選位置。`FileSystemFileHandle` 存不進 localStorage，要用 IndexedDB，重新開啟時瀏覽器會再要一次權限
+- **關閉分頁前立即寫入**：目前 debounce 1 秒，最後一秒的修改可能沒暫存；需要時加 `pagehide` 事件
 
 ## Code Review（2026-10-23 許願）
 
