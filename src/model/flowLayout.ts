@@ -141,3 +141,67 @@ export function nextNodePos(src: Rect, size: { w: number; h: number }, others: R
   }
   return { x, y }
 }
+
+const GAP_RANK = 60
+const GAP_NODE = 40
+const ORIGIN = 40
+
+/**
+ * 匯入用的分層排版，回傳每個節點的左上角。nodes 的順序 = 層內順序。
+ * 依節點順序 DFS 斷開回邊（含自我迴圈），在剩下的 DAG 上做最長路徑分層；BT / RL 把層的順序反過來
+ */
+export function layerLayout(
+  nodes: { id: string; w: number; h: number }[],
+  edges: { from: string; to: string }[],
+  dir: 'TD' | 'LR' | 'RL' | 'BT',
+): Map<string, Point> {
+  const out = new Map(nodes.map((n) => [n.id, [] as string[]]))
+  for (const e of edges) if (e.from !== e.to && out.has(e.to)) out.get(e.from)?.push(e.to)
+
+  // 1 = 還在遞迴堆疊中，2 = 完成
+  const state = new Map<string, 1 | 2>()
+  const dag = new Map(nodes.map((n) => [n.id, [] as string[]]))
+  const post: string[] = []
+  const visit = (u: string) => {
+    state.set(u, 1)
+    for (const v of out.get(u)!) {
+      const s = state.get(v)
+      if (s === 1) continue
+      dag.get(u)!.push(v)
+      if (!s) visit(v)
+    }
+    state.set(u, 2)
+    post.push(u)
+  }
+  for (const n of nodes) if (!state.has(n.id)) visit(n.id)
+
+  // 反向後序 = DAG 的拓撲順序
+  const rank = new Map(nodes.map((n) => [n.id, 0]))
+  for (const u of post.reverse()) for (const v of dag.get(u)!) rank.set(v, Math.max(rank.get(v)!, rank.get(u)! + 1))
+
+  // ponytail: 層內只照出現順序排，不做交叉最小化；箭頭交叉多時再加 barycenter 排序
+  const layers: (typeof nodes)[] = []
+  for (const n of nodes) (layers[rank.get(n.id)!] ??= []).push(n)
+  if (dir === 'BT' || dir === 'RL') layers.reverse()
+
+  const vertical = dir === 'TD' || dir === 'BT'
+  const main = (n: { w: number; h: number }) => (vertical ? n.h : n.w)
+  const cross = (n: { w: number; h: number }) => (vertical ? n.w : n.h)
+  const span = (l: typeof nodes) => l.reduce((s, n) => s + cross(n), 0) + GAP_NODE * (l.length - 1)
+  const widest = Math.max(0, ...layers.map(span))
+
+  const pos = new Map<string, Point>()
+  let m = 0
+  for (const l of layers) {
+    const thick = Math.max(...l.map(main))
+    let c = (widest - span(l)) / 2
+    for (const n of l) {
+      const a = Math.round(ORIGIN + m + (thick - main(n)) / 2)
+      const b = Math.round(ORIGIN + c)
+      pos.set(n.id, vertical ? { x: b, y: a } : { x: a, y: b })
+      c += cross(n) + GAP_NODE
+    }
+    m += thick + GAP_RANK
+  }
+  return pos
+}

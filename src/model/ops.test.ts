@@ -1,6 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { describe, expect, it } from 'vitest'
 import { useProjectStore } from '../store/project'
+import { parseMermaidFlowchart } from '../io/mermaid'
+import { packageBox } from './classLayout'
 import { flowNodeBox, nextNodePos } from './flowLayout'
 import * as ops from './ops'
 import type { Message, Project, SeqItem } from './types'
@@ -577,5 +579,80 @@ describe('套件與子圖框大小', () => {
     const sg = ops.getFlowchart(p, d).subgraphs[0]
     expect('w' in sg || 'h' in sg).toBe(false)
     expect(sg.nodeIds).toEqual([n])
+  })
+})
+
+describe('匯入 Mermaid 流程圖', () => {
+  const measure = (t: string) => t.length * 7
+  const parse = (text: string) => {
+    const r = parseMermaidFlowchart(text)
+    if (!r.ok) throw new Error(r.error)
+    return r.flow
+  }
+  const SRC = [
+    '---',
+    'title: 請假流程',
+    '---',
+    'flowchart TD',
+    'A([開始]) --> B[填表] --> C{通過？}',
+    'subgraph 後端',
+    ' D[(存檔)]',
+    ' E[/通知/]',
+    'end',
+    'subgraph 空的',
+    'end',
+    'C -->|是| D',
+    'C -- 否 --> B',
+    'D --> E',
+  ].join('\n')
+
+  it('節點、箭頭、子圖數量與內容正確', () => {
+    const p = ops.emptyProject()
+    const f = ops.getFlowchart(p, ops.importFlowchart(p, parse(SRC), measure))
+    expect(f.nodes.map((n) => [n.shape, n.text])).toEqual([
+      ['terminal', '開始'],
+      ['process', '填表'],
+      ['decision', '通過？'],
+      ['database', '存檔'],
+      ['io', '通知'],
+    ])
+    const text = (id: string) => f.nodes.find((n) => n.id === id)!.text
+    expect(f.edges.map((e) => `${text(e.from)}>${text(e.to)}${e.label}`)).toEqual([
+      '開始>填表',
+      '填表>通過？',
+      '通過？>存檔是',
+      '通過？>填表否',
+      '存檔>通知',
+    ])
+    expect(f.subgraphs.map((g) => [g.title, g.nodeIds.map(text)])).toEqual([['後端', ['存檔', '通知']]])
+  })
+
+  it('圖名用 title，沒有 title 時用預設名稱', () => {
+    const p = ops.emptyProject()
+    const a = ops.importFlowchart(p, parse(SRC), measure)
+    const b = ops.importFlowchart(p, parse('graph TD\n A --> B'), measure)
+    expect([ops.getDiagram(p, a).name, ops.getDiagram(p, b).name]).toEqual(['請假流程', '匯入的流程圖'])
+  })
+
+  it('子圖框完整包住所有成員', () => {
+    const p = ops.emptyProject()
+    const f = ops.getFlowchart(p, ops.importFlowchart(p, parse(SRC), measure))
+    const rects = new Map(f.nodes.map((n) => [n.id, { x: n.x, y: n.y, ...flowNodeBox(n, measure) }]))
+    for (const g of f.subgraphs) {
+      const box = packageBox({ ...g, ids: g.nodeIds }, rects)
+      for (const id of g.nodeIds) {
+        const r = rects.get(id)!
+        expect(r.x >= box.x && r.y >= box.y && r.x + r.w <= box.x + box.w && r.y + r.h <= box.y + box.h).toBe(true)
+      }
+    }
+  })
+
+  it('在單一 store.apply 中執行，一次復原整張圖消失', () => {
+    setActivePinia(createPinia())
+    const s = useProjectStore()
+    const id = s.apply((p) => ops.importFlowchart(p, parse(SRC), measure))
+    expect(s.project.diagrams.map((d) => d.id)).toEqual([id])
+    s.undo()
+    expect(s.project.diagrams).toEqual([])
   })
 })

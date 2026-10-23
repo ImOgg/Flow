@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Point, Rect } from './classLayout'
-import { CAP, flowNodeBox, flowRoute, labelPos, nextNodePos, SLANT, type ShapedRect } from './flowLayout'
+import { CAP, flowNodeBox, flowRoute, labelPos, layerLayout, nextNodePos, SLANT, type ShapedRect } from './flowLayout'
 import type { FlowShape } from './types'
 
 const measure = (t: string) => t.length * 7
@@ -156,5 +156,65 @@ describe('nextNodePos', () => {
   it('連續三格被佔：落在第四格', () => {
     const others = [0, 140, 280].map((x) => ({ x, y: 90, w: 100, h: 40 }))
     expect(nextNodePos(src, size, [src, ...others])).toEqual({ x: 420, y: 90 })
+  })
+})
+
+describe('layerLayout', () => {
+  const box = (id: string, w = 100, h = 40) => ({ id, w, h })
+  const chain = (...ids: string[]) => ids.slice(1).map((to, i) => ({ from: ids[i], to }))
+  const noOverlap = (rects: Rect[]) =>
+    rects.every((a, i) => rects.slice(i + 1).every((b) => a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y))
+  const rectsOf = (nodes: { id: string; w: number; h: number }[], pos: Map<string, Point>) =>
+    nodes.map((n) => ({ ...pos.get(n.id)!, w: n.w, h: n.h }))
+
+  it('由上而下：A、B、C 依序往下，不重疊，左上角從 ORIGIN 開始', () => {
+    const nodes = ['A', 'B', 'C'].map((id) => box(id))
+    const pos = layerLayout(nodes, chain('A', 'B', 'C'), 'TD')
+    const [a, b, c] = ['A', 'B', 'C'].map((id) => pos.get(id)!)
+    expect(a.y).toBeLessThan(b.y)
+    expect(b.y).toBeLessThan(c.y)
+    expect(noOverlap(rectsOf(nodes, pos))).toBe(true)
+    expect(Math.min(...[...pos.values()].map((p) => p.x))).toBe(40)
+    expect(Math.min(...[...pos.values()].map((p) => p.y))).toBe(40)
+  })
+
+  it('由左而右：B 在 A 的右邊', () => {
+    const pos = layerLayout([box('A'), box('B')], chain('A', 'B'), 'LR')
+    expect(pos.get('B')!.x).toBeGreaterThan(pos.get('A')!.x + 100)
+    expect(pos.get('B')!.y).toBe(pos.get('A')!.y)
+  })
+
+  it('BT、RL 方向反轉', () => {
+    const nodes = [box('A'), box('B')]
+    const bt = layerLayout(nodes, chain('A', 'B'), 'BT')
+    const rl = layerLayout(nodes, chain('A', 'B'), 'RL')
+    expect(bt.get('B')!.y).toBeLessThan(bt.get('A')!.y)
+    expect(rl.get('B')!.x).toBeLessThan(rl.get('A')!.x)
+  })
+
+  it('有迴圈：回邊忽略，仍由上而下', () => {
+    const nodes = ['A', 'B', 'C'].map((id) => box(id))
+    const pos = layerLayout(nodes, chain('A', 'B', 'C', 'A'), 'TD')
+    const [a, b, c] = ['A', 'B', 'C'].map((id) => pos.get(id)!.y)
+    expect(a < b && b < c).toBe(true)
+  })
+
+  it('自我迴圈不影響分層', () => {
+    const pos = layerLayout([box('A'), box('B')], [{ from: 'A', to: 'A' }, ...chain('A', 'B')], 'TD')
+    expect(pos.get('A')!.y).toBe(40)
+    expect(pos.get('B')!.y).toBeGreaterThan(40)
+  })
+
+  it('不同大小的節點互不重疊（同層與跨層）', () => {
+    const nodes = [box('A', 200, 80), box('B', 60, 40), box('C', 300, 120), box('D', 100, 200), box('E')]
+    const edges = [...chain('A', 'B'), ...chain('A', 'C'), ...chain('A', 'D'), ...chain('B', 'E'), ...chain('C', 'E')]
+    for (const dir of ['TD', 'LR', 'BT', 'RL'] as const) {
+      expect(noOverlap(rectsOf(nodes, layerLayout(nodes, edges, dir)))).toBe(true)
+    }
+  })
+
+  it('最長路徑分層：A→C 與 A→B→C 時 C 在 B 之後', () => {
+    const pos = layerLayout(['A', 'B', 'C'].map((id) => box(id)), [...chain('A', 'C'), ...chain('A', 'B', 'C')], 'TD')
+    expect(pos.get('C')!.y).toBeGreaterThan(pos.get('B')!.y)
   })
 })
