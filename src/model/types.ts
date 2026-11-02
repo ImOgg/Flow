@@ -192,6 +192,15 @@ export interface Project {
   diagrams: Diagram[]
 }
 
+/** 複製當下的快照，保留原 id，貼上時才換新 id；只能貼到同 type 的圖 */
+export type Clip =
+  | ({ type: 'flowchart' } & Pick<FlowchartDiagram, 'nodes' | 'edges' | 'subgraphs'>)
+  | ({ type: 'class'; elements: Classifier[]; relations: Relation[] } & Pick<
+      ClassDiagram,
+      'nodes' | 'edges' | 'notes' | 'packages'
+    >)
+  | { type: 'sequence'; items: SeqItem[]; lifelines: Lifeline[] }
+
 /** 循序圖中的插入位置：container 為 null 表示最外層，否則為某片段的某個區段 */
 export interface InsertPos {
   container: { fragmentId: Id; operand: number } | null
