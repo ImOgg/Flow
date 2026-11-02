@@ -9,6 +9,7 @@ import { exportPng, exportSvg } from '../../io/export'
 import { useEditorStore } from '../../store/editor'
 import { useProjectStore } from '../../store/project'
 import Canvas from '../Canvas.vue'
+import { handleClipboardKey } from '../clipboard'
 import InlineInput from '../InlineInput.vue'
 import Markers from '../Markers.vue'
 import { measureText } from '../measure'
@@ -312,6 +313,12 @@ function onMarquee(r: Rect, additive: boolean) {
 
 function onKeyDown(e: KeyboardEvent) {
   if (isTyping()) return
+  const handled = handleClipboardKey(e, 'flowchart', {
+    copy: (p) => ops.copyFlowItems(p, dId(), ed.selection),
+    remove: (p, ids) => ops.removeFlowItems(p, dId(), ids),
+    paste: (p, clip, offset) => ops.pasteFlowItems(p, dId(), clip, offset),
+  })
+  if (handled) return
   if (e.key === 'Escape') {
     ed.clear()
     ed.tool = 'select'

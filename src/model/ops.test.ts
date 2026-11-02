@@ -656,3 +656,229 @@ describe('匯入 Mermaid 流程圖', () => {
     expect(s.project.diagrams).toEqual([])
   })
 })
+
+describe('複製貼上：流程圖', () => {
+  function fc() {
+    const p = ops.emptyProject()
+    const d = ops.addDiagram(p, 'flowchart', 'FC')
+    const a = ops.addFlowNode(p, d, 'process', 0, 0, 'A')
+    const b = ops.addFlowNode(p, d, 'decision', 0, 100, 'B')
+    const c = ops.addFlowNode(p, d, 'terminal', 0, 200, 'C')
+    const ab = ops.addFlowEdge(p, d, a, b, '是')
+    ops.addFlowEdge(p, d, b, c)
+    return { p, d, a, b, c, ab, f: () => ops.getFlowchart(p, d) }
+  }
+
+  it('只複製兩端都在範圍內的箭頭；貼上換新 id 並偏移', () => {
+    const { p, d, a, b, ab, f } = fc()
+    ops.setFlowEdgeBends(p, d, ab, [{ x: 50, y: 50 }])
+    const clip = ops.copyFlowItems(p, d, [a, b, ab])!
+    expect(clip.nodes.map((n) => n.text)).toEqual(['A', 'B'])
+    expect(clip.edges).toHaveLength(1)
+    const ids = ops.pasteFlowItems(p, d, clip, 20)
+    expect(ids).toHaveLength(3)
+    expect([f().nodes.length, f().edges.length]).toEqual([5, 3])
+    const [na, nb] = f().nodes.slice(3)
+    expect([na.text, na.x, na.y, nb.shape]).toEqual(['A', 20, 20, 'decision'])
+    expect(f().edges[2]).toMatchObject({ from: na.id, to: nb.id, label: '是', bends: [{ x: 70, y: 70 }] })
+    expect(ids).not.toContain(a)
+  })
+
+  it('子圖框連同成員複製', () => {
+    const { p, d, a, b, f } = fc()
+    const g = ops.addSubgraph(p, d, -10, -10, 'G')
+    ops.setSubgraphMembership(p, d, a, g)
+    ops.setSubgraphMembership(p, d, b, g)
+    const clip = ops.copyFlowItems(p, d, [g])!
+    expect(clip.nodes).toHaveLength(2)
+    ops.pasteFlowItems(p, d, clip, 20)
+    const ng = f().subgraphs[1]
+    expect([ng.title, ng.x, ng.nodeIds]).toEqual(['G', 10, f().nodes.slice(3).map((n) => n.id)])
+    expect(ops.clipIds(clip)).toEqual([a, b, g])
+  })
+
+  it('沒有可複製的內容回傳 null；同一份剪貼簿可重複貼上', () => {
+    const { p, d, ab, a, f } = fc()
+    expect(ops.copyFlowItems(p, d, [ab])).toBeNull()
+    expect(ops.copyFlowItems(p, d, [])).toBeNull()
+    const clip = ops.copyFlowItems(p, d, [a])!
+    const first = ops.pasteFlowItems(p, d, clip, 20)
+    const second = ops.pasteFlowItems(p, d, clip, 40)
+    expect(first[0]).not.toBe(second[0])
+    expect(f().nodes.map((n) => n.x)).toEqual([0, 0, 0, 20, 40])
+  })
+
+  it('剪下（複製 + 刪除）在同一次 apply，一次復原', () => {
+    setActivePinia(createPinia())
+    const s = useProjectStore()
+    const { d, a, b } = s.apply((p) => {
+      const d = ops.addDiagram(p, 'flowchart', 'FC')
+      const a = ops.addFlowNode(p, d, 'process', 0, 0)
+      const b = ops.addFlowNode(p, d, 'process', 0, 100)
+      ops.addFlowEdge(p, d, a, b)
+      return { d, a, b }
+    })
+    const clip = ops.copyFlowItems(s.project, d, [a, b])!
+    s.apply((p) => ops.removeFlowItems(p, d, ops.clipIds(clip)))
+    expect(ops.getFlowchart(s.project, d).nodes).toEqual([])
+    s.undo()
+    const f = ops.getFlowchart(s.project, d)
+    expect([f.nodes.length, f.edges.length]).toEqual([2, 1])
+  })
+})
+
+describe('複製貼上：類別圖', () => {
+  function cd() {
+    const { p, user, order, cd1, cd2 } = setup()
+    ops.addMember(p, user, 'attributes', { visibility: '-', name: 'id', type: 'int' })
+    ops.addNode(p, cd1, user, 0, 0)
+    ops.addNode(p, cd1, order, 200, 0)
+    const rel = ops.addRelation(p, 'association', user, order, cd1)
+    return { p, user, order, cd1, cd2, rel }
+  }
+  const names = (p: Project) => Object.values(p.model.elements).map((e) => e.name)
+
+  it('剪下後貼到另一張圖：放原元素並沿用原關係與轉折點', () => {
+    const { p, user, order, cd1, cd2, rel } = cd()
+    ops.setEdgeBends(p, cd1, rel, [{ x: 100, y: 50 }])
+    const clip = ops.copyClassItems(p, cd1, [user, order])!
+    ops.removeFromDiagram(p, cd1, ops.clipIds(clip))
+    const ids = ops.pasteClassItems(p, cd2, clip, 20)
+    expect(names(p)).toEqual(['User', 'Order'])
+    expect(cls(p, cd2).nodes).toEqual([
+      { elementId: user, x: 20, y: 20 },
+      { elementId: order, x: 220, y: 20 },
+    ])
+    expect(cls(p, cd2).edges).toEqual([{ relationId: rel, bends: [{ x: 120, y: 70 }] }])
+    expect(ids).toEqual([user, order, rel])
+  })
+
+  it('同一張圖複製貼上：建立含成員的 _copy 副本與新關係', () => {
+    const { p, user, order, cd1, rel } = cd()
+    const clip = ops.copyClassItems(p, cd1, [user, order])!
+    const ids = ops.pasteClassItems(p, cd1, clip, 20)
+    expect(names(p)).toEqual(['User', 'Order', 'User_copy', 'Order_copy'])
+    const [nu, no, nr] = ids
+    expect(p.model.elements[nu].attributes).toEqual([{ visibility: '-', name: 'id', type: 'int' }])
+    expect(p.model.elements[nu].attributes).not.toBe(p.model.elements[user].attributes)
+    expect(p.model.relations[nr]).toMatchObject({ kind: 'association', sourceId: nu, targetId: no })
+    expect(cls(p, cd1).edges.map((e) => e.relationId)).toEqual([rel, nr])
+  })
+
+  it('元素已從模型刪除時從快照建立副本', () => {
+    const { p, user, cd1 } = cd()
+    const clip = ops.copyClassItems(p, cd1, [user])!
+    ops.deleteElement(p, user)
+    const [id] = ops.pasteClassItems(p, cd1, clip, 20)
+    expect(id).not.toBe(user)
+    expect(p.model.elements[id].name).toBe('User_copy')
+  })
+
+  it('只複製兩端都在範圍內的關係', () => {
+    const { p, user, cd1 } = cd()
+    const clip = ops.copyClassItems(p, cd1, [user])!
+    expect([clip.relations, clip.edges]).toEqual([[], []])
+  })
+
+  it('套件連同成員複製；註解只保留連到同批 Class 的連結', () => {
+    const { p, user, order, cd1 } = cd()
+    const pkg = ops.addPackage(p, cd1, -10, -10, 'P')
+    ops.setPackageMembership(p, cd1, user, pkg)
+    ops.setPackageMembership(p, cd1, order, pkg)
+    const note = ops.addNote(p, cd1, 0, 300, 'N')
+    ops.linkNote(p, cd1, note, user)
+    ops.linkNote(p, cd1, note, order)
+    expect(ops.copyClassItems(p, cd1, [ops.noteLinkId(note, user)])).toBeNull()
+    const clip = ops.copyClassItems(p, cd1, [pkg])!
+    expect(clip.nodes).toHaveLength(2)
+    const [nu, no] = ops.pasteClassItems(p, cd1, clip, 20)
+    expect(cls(p, cd1).packages[1]).toMatchObject({ name: 'P', x: 10, y: 10, elementIds: [nu, no] })
+
+    const noteClip = ops.copyClassItems(p, cd1, [note, user])!
+    const pasted = ops.pasteClassItems(p, cd1, noteClip, 20)
+    expect(cls(p, cd1).notes.at(-1)).toMatchObject({ text: 'N', x: 20, y: 320, links: [pasted[0]] })
+  })
+})
+
+describe('複製貼上：循序圖', () => {
+  function sq() {
+    const s = setup()
+    const a = ops.addLifeline(s.p, s.sd, 'A')
+    const b = ops.addLifeline(s.p, s.sd, 'B')
+    const msg = (text: string) => ops.insertMessage(s.p, s.sd, { from: a, to: b, text, type: 'sync' })
+    return { ...s, a, b, msg, items: () => seq(s.p, s.sd).items }
+  }
+
+  it('依上下順序複製，貼在最後一個選取項目之後並換新 id', () => {
+    const { p, sd, msg, items } = sq()
+    const m1 = msg('m1')
+    const m2 = msg('m2')
+    const m3 = msg('m3')
+    const clip = ops.copySeqItems(p, sd, [m2, m1])!
+    expect(shape(clip.items)).toBe('m1 m2')
+    const ids = ops.pasteSeqItems(p, sd, clip, [m3, m1])
+    expect(shape(items())).toBe('m1 m2 m3 m1 m2')
+    expect(ids).toEqual(items().slice(3).map((it) => it.id))
+    expect(ids).not.toContain(m1)
+  })
+
+  it('沒有選取時加在最後；可貼進片段內', () => {
+    const { p, sd, msg, items } = sq()
+    const m1 = msg('m1')
+    const m2 = msg('m2')
+    ops.wrapInFragment(p, sd, [m2], 'loop')
+    const clip = ops.copySeqItems(p, sd, [m1])!
+    ops.pasteSeqItems(p, sd, clip, [])
+    expect(shape(items())).toBe('m1 loop(m2) m1')
+    ops.pasteSeqItems(p, sd, clip, [m2])
+    expect(shape(items())).toBe('m1 loop(m2 m1) m1')
+  })
+
+  it('片段連同內容複製，子項目不重複；只選生命線回傳 null', () => {
+    const { p, sd, a, msg, items } = sq()
+    const m1 = msg('m1')
+    const loop = ops.wrapInFragment(p, sd, [m1], 'loop')!
+    expect(ops.copySeqItems(p, sd, [a])).toBeNull()
+    const clip = ops.copySeqItems(p, sd, [loop, m1])!
+    expect(shape(clip.items)).toBe('loop(m1)')
+    ops.pasteSeqItems(p, sd, clip, [])
+    const pasted = items()[1] as Extract<SeqItem, { kind: 'fragment' }>
+    expect(pasted.operands[0].items[0].id).not.toBe(m1)
+  })
+
+  it('剪下片段連同內容移除；Delete 的 deleteItem 仍只解除框', () => {
+    const { p, sd, msg, items } = sq()
+    msg('m1')
+    const m2 = msg('m2')
+    const loop = ops.wrapInFragment(p, sd, [m2], 'loop')!
+    const clip = ops.copySeqItems(p, sd, [loop])!
+    ops.removeSeqItems(p, sd, ops.clipIds(clip))
+    expect(shape(items())).toBe('m1')
+    ops.pasteSeqItems(p, sd, clip, [])
+    expect(shape(items())).toBe('m1 loop(m2)')
+  })
+
+  it('跨圖依名稱對應生命線，找不到就新增；同圖依 id 對應', () => {
+    const { p, sd, a, b, user, msg } = sq()
+    ops.addLifeline(p, sd, '', user)
+    const m1 = msg('m1')
+    const note = ops.insertNote(p, sd, [seq(p, sd).lifelines[2].id], 'n')
+    const sd2 = ops.addDiagram(p, 'sequence', 'SD2')
+    const a2 = ops.addLifeline(p, sd2, 'A')
+    const clip = ops.copySeqItems(p, sd, [m1, note])!
+    ops.pasteSeqItems(p, sd2, clip, [])
+    const d2 = seq(p, sd2)
+    expect(d2.lifelines.map((l) => [l.name, l.elementId])).toEqual([
+      ['A', undefined],
+      ['B', undefined],
+      ['', user],
+    ])
+    expect(d2.items[0]).toMatchObject({ from: a2, to: d2.lifelines[1].id })
+    expect(d2.items[1]).toMatchObject({ over: [d2.lifelines[2].id] })
+
+    ops.renameLifeline(p, sd, b, 'A')
+    const same = ops.copySeqItems(p, sd, [m1])!
+    ops.pasteSeqItems(p, sd, same, [])
+    expect(seq(p, sd).items.at(-1)).toMatchObject({ from: a, to: b })
+  })
+})

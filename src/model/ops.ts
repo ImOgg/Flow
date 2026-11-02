@@ -5,8 +5,10 @@ import type {
   ClassDiagram,
   Classifier,
   ClassifierKind,
+  Clip,
   Diagram,
   FlowchartDiagram,
+  FlowEdge,
   FlowNode,
   FlowShape,
   Fragment,
@@ -514,6 +516,181 @@ export function addOperand(p: Project, diagramId: Id, fragmentId: Id, guard = 'e
 
 export function setGuard(p: Project, diagramId: Id, fragmentId: Id, operand: number, guard: string) {
   getFragment(getSequenceDiagram(p, diagramId), fragmentId).operands[operand].guard = guard
+}
+
+// ---------- 複製貼上 ----------
+// copyXxx 只讀不寫，沒有可複製內容時回傳 null；pasteXxx 回傳新內容的 id 供選取
+
+type FlowClip = Extract<Clip, { type: 'flowchart' }>
+
+/** 剪下時要刪除的 id：只含實際被複製的頂層內容 */
+export function clipIds(clip: Clip): Id[] {
+  switch (clip.type) {
+    case 'flowchart':
+      return [...clip.nodes, ...clip.subgraphs].map((x) => x.id)
+    case 'class':
+      return [...clip.nodes.map((n) => n.elementId), ...clip.notes.map((n) => n.id), ...clip.packages.map((k) => k.id)]
+    case 'sequence':
+      return clip.items.map((it) => it.id)
+  }
+}
+
+/** 選取的節點與子圖框（含成員），以及兩端都在範圍內的箭頭 */
+export function copyFlowItems(p: Project, diagramId: Id, ids: Id[]): FlowClip | null {
+  const d = getFlowchart(p, diagramId)
+  const sel = new Set(ids)
+  const subgraphs = d.subgraphs.filter((g) => sel.has(g.id))
+  for (const g of subgraphs) for (const n of g.nodeIds) sel.add(n)
+  const nodes = d.nodes.filter((n) => sel.has(n.id))
+  if (!nodes.length && !subgraphs.length) return null
+  const edges = d.edges.filter((e) => sel.has(e.from) && sel.has(e.to))
+  return structuredClone({ type: 'flowchart', nodes, edges, subgraphs })
+}
+
+export function pasteFlowItems(p: Project, diagramId: Id, clip: FlowClip, offset: number): Id[] {
+  const d = getFlowchart(p, diagramId)
+  const ids = new Map<Id, Id>()
+  const fresh = (old: Id) => ids.set(old, newId()).get(old)!
+  const shift = (pt: Point) => ({ x: pt.x + offset, y: pt.y + offset })
+  for (const n of clip.nodes) d.nodes.push({ ...n, id: fresh(n.id), ...shift(n) })
+  for (const e of clip.edges) {
+    const edge: FlowEdge = { ...e, id: fresh(e.id), from: ids.get(e.from)!, to: ids.get(e.to)! }
+    if (e.bends) edge.bends = e.bends.map(shift)
+    d.edges.push(edge)
+  }
+  for (const g of clip.subgraphs) {
+    d.subgraphs.push({ ...g, id: fresh(g.id), ...shift(g), nodeIds: g.nodeIds.filter((n) => ids.has(n)).map((n) => ids.get(n)!) })
+  }
+  return [...ids.values()]
+}
+
+type ClassClip = Extract<Clip, { type: 'class' }>
+
+/** 選取的 Class、註解與套件框（含成員），以及兩端都在範圍內的關係；元素與關係存完整快照 */
+export function copyClassItems(p: Project, diagramId: Id, ids: Id[]): ClassClip | null {
+  const d = getClassDiagram(p, diagramId)
+  const sel = new Set(ids)
+  const packages = d.packages.filter((k) => sel.has(k.id))
+  for (const k of packages) for (const el of k.elementIds) sel.add(el)
+  const nodes = d.nodes.filter((n) => sel.has(n.elementId))
+  const notes = d.notes.filter((n) => sel.has(n.id))
+  if (!nodes.length && !notes.length && !packages.length) return null
+  const onClip = new Set(nodes.map((n) => n.elementId))
+  const edges = d.edges.filter((e) => {
+    const r = p.model.relations[e.relationId]
+    return r && onClip.has(r.sourceId) && onClip.has(r.targetId)
+  })
+  const elements = nodes.map((n) => getElement(p, n.elementId))
+  const relations = edges.map((e) => p.model.relations[e.relationId])
+  return structuredClone({ type: 'class', elements, relations, nodes, edges, notes, packages })
+}
+
+/**
+ * 元素還在模型且不在目標圖上就放原元素，否則建立名稱加 _copy 的副本。
+ * 兩端都是原元素且原關係還在時沿用（addNode 會自動帶入），其餘建立新關係
+ */
+export function pasteClassItems(p: Project, diagramId: Id, clip: ClassClip, offset: number): Id[] {
+  const d = getClassDiagram(p, diagramId)
+  const onDiagram = new Set(d.nodes.map((n) => n.elementId))
+  const ids = new Map<Id, Id>()
+  const shift = (pt: Point) => ({ x: pt.x + offset, y: pt.y + offset })
+  for (const el of clip.elements) {
+    let id = el.id
+    if (!p.model.elements[id] || onDiagram.has(id)) {
+      id = newId()
+      p.model.elements[id] = { ...structuredClone(el), id, name: `${el.name}_copy` }
+    }
+    ids.set(el.id, id)
+  }
+  for (const n of clip.nodes) addNode(p, diagramId, ids.get(n.elementId)!, n.x + offset, n.y + offset)
+  const relIds = clip.relations.map((r) => {
+    const s = ids.get(r.sourceId)!
+    const t = ids.get(r.targetId)!
+    const keep = p.model.relations[r.id] && s === r.sourceId && t === r.targetId
+    const id = keep ? r.id : addRelation(p, r.kind, s, t, diagramId)
+    const bends = clip.edges.find((e) => e.relationId === r.id)?.bends
+    if (bends) setEdgeBends(p, diagramId, id, bends.map(shift))
+    return id
+  })
+  const noteIds = clip.notes.map((n) => {
+    const id = newId()
+    const links = n.links.filter((el) => ids.has(el)).map((el) => ids.get(el)!)
+    d.notes.push({ ...n, id, ...shift(n), links })
+    return id
+  })
+  const pkgIds = clip.packages.map((k) => {
+    const id = newId()
+    const elementIds = k.elementIds.filter((el) => ids.has(el)).map((el) => ids.get(el)!)
+    d.packages.push({ ...k, id, ...shift(k), elementIds })
+    return id
+  })
+  return [...ids.values(), ...relIds, ...noteIds, ...pkgIds]
+}
+
+type SeqClip = Extract<Clip, { type: 'sequence' }>
+
+/** 依上下順序展開所有項目（含片段內） */
+const flatItems = (items: SeqItem[]): SeqItem[] =>
+  items.flatMap((it) => [it, ...(it.kind === 'fragment' ? it.operands.flatMap((o) => flatItems(o.items)) : [])])
+
+/** 依上下順序複製選取的訊息、註解與片段（片段含內容，其子項目不重複），以及引用到的生命線 */
+export function copySeqItems(p: Project, diagramId: Id, ids: Id[]): SeqClip | null {
+  const d = getSequenceDiagram(p, diagramId)
+  const sel = new Set(ids)
+  const items: SeqItem[] = []
+  const walk = (list: SeqItem[]) => {
+    for (const it of list) {
+      if (sel.has(it.id)) items.push(it)
+      else if (it.kind === 'fragment') for (const o of it.operands) walk(o.items)
+    }
+  }
+  walk(d.items)
+  if (!items.length) return null
+  const used = new Set(
+    flatItems(items).flatMap((it) => (it.kind === 'message' ? [it.from, it.to] : it.kind === 'note' ? it.over : [])),
+  )
+  const lifelines = d.lifelines.filter((l) => used.has(l.id))
+  return structuredClone({ type: 'sequence', items, lifelines })
+}
+
+/**
+ * 插在 selection 中上下順序最後的項目之後，沒有就加在最外層最後。
+ * 生命線：目標圖有同 id 就沿用，否則交給 ensureLifeline 依名稱（加綁定類別名）對應或新增
+ */
+export function pasteSeqItems(p: Project, diagramId: Id, clip: SeqClip, selection: Id[]): Id[] {
+  const d = getSequenceDiagram(p, diagramId)
+  const sel = new Set(selection)
+  const last = flatItems(d.items)
+    .filter((it) => sel.has(it.id))
+    .at(-1)
+  const pos = (last && posAfter(d, last.id)) || { container: null, index: d.items.length }
+  const lines = new Map<Id, Id>()
+  for (const l of clip.lifelines) {
+    const cls = l.elementId && p.model.elements[l.elementId]?.name
+    const id = d.lifelines.some((x) => x.id === l.id) ? l.id : ensureLifeline(p, diagramId, cls ? `${l.name}: ${cls}` : l.name)
+    lines.set(l.id, id)
+  }
+  const renew = (it: SeqItem): SeqItem => {
+    const id = newId()
+    if (it.kind === 'message') return { ...it, id, from: lines.get(it.from)!, to: lines.get(it.to)! }
+    if (it.kind === 'note') return { ...it, id, over: it.over.map((l) => lines.get(l)!) }
+    return { ...it, id, operands: it.operands.map((o) => ({ ...o, items: o.items.map(renew) })) }
+  }
+  const items = clip.items.map(renew)
+  containerList(d, pos.container).splice(pos.index, 0, ...items)
+  return items.map((it) => it.id)
+}
+
+/** 連同內容移除項目（片段也整個移除，不同於 deleteItem 的解除） */
+export function removeSeqItems(p: Project, diagramId: Id, ids: Id[]) {
+  const d = getSequenceDiagram(p, diagramId)
+  const del = new Set(ids)
+  const prune = (items: SeqItem[]): SeqItem[] =>
+    items.filter((it) => {
+      if (it.kind === 'fragment') for (const o of it.operands) o.items = prune(o.items)
+      return !del.has(it.id)
+    })
+  d.items = prune(d.items)
 }
 
 // ---------- 查詢輔助 ----------
