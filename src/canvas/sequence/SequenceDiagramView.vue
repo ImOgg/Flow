@@ -9,6 +9,7 @@ import { exportPng, exportSvg } from '../../io/export'
 import { useEditorStore } from '../../store/editor'
 import { useProjectStore } from '../../store/project'
 import Canvas from '../Canvas.vue'
+import { handleClipboardKey } from '../clipboard'
 import InlineInput from '../InlineInput.vue'
 import Markers from '../Markers.vue'
 import { measureText } from '../measure'
@@ -239,6 +240,12 @@ function onMarquee(r: Rect, additive: boolean) {
 
 function onKeyDown(e: KeyboardEvent) {
   if (isTyping()) return
+  const handled = handleClipboardKey(e, 'sequence', {
+    copy: (p) => ops.copySeqItems(p, dId(), ed.selection),
+    remove: (p, ids) => ops.removeSeqItems(p, dId(), ids),
+    paste: (p, clip) => ops.pasteSeqItems(p, dId(), clip, ed.selection), // 循序圖依選取決定位置，不用偏移
+  })
+  if (handled) return
   if (e.key === 'Escape') ed.clear()
   else if ((e.key === 'Delete' || e.key === 'Backspace') && ed.selection.length) {
     e.preventDefault()

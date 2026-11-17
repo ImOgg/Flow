@@ -21,6 +21,7 @@ import { exportPng, exportSvg } from '../../io/export'
 import { useEditorStore, type ClassTool, type FlowTool } from '../../store/editor'
 import { useProjectStore } from '../../store/project'
 import Canvas from '../Canvas.vue'
+import { handleClipboardKey } from '../clipboard'
 import InlineInput from '../InlineInput.vue'
 import Markers from '../Markers.vue'
 import { measureText } from '../measure'
@@ -361,6 +362,12 @@ function onDrop(e: DragEvent) {
 
 function onKeyDown(e: KeyboardEvent) {
   if (isTyping()) return
+  const handled = handleClipboardKey(e, 'class', {
+    copy: (p) => ops.copyClassItems(p, dId(), ed.selection),
+    remove: (p, ids) => ops.removeFromDiagram(p, dId(), ids),
+    paste: (p, clip, offset) => ops.pasteClassItems(p, dId(), clip, offset),
+  })
+  if (handled) return
   if (e.key === 'Escape') {
     ed.clear()
     ed.tool = 'select'

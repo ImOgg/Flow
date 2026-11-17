@@ -13,20 +13,22 @@
   - 圖上 Delete 只會隱藏連線；拉錯的關係會留在模型，之後放上同兩個元素時自動出現
   - 建議：選取連線按 Shift+Delete 從模型刪除
 - **模型樹標出沒放在任何圖上的元素**（例如淡色顯示）
-- **Package 可調整大小**（2026-10-13 許願）→ 已開 change：`openspec/changes/package-resize`（含流程圖子圖框；待 `flowchart` 歸檔後實作）
-  - 目前框大小 = 最小尺寸與成員範圍的聯集，無法手動放大（例如先拉大框再把類別放進去）
-  - 建議做法：Package 加選填的 `w` / `h`，`packageBox` 的最小尺寸改用它（沒有就用預設 160 × 100）；選取時右下角出現拖曳把手，放開才寫入，一次拖曳 = 一筆復原
-  - 框永遠不會小於成員範圍（仍取聯集），所以縮小不會把成員擠出去，也不會影響成員判定
-  - 流程圖子圖也共用 `packageBox`（`Frame`），可以一起支援
-  - 檔案格式：`w` / `h` 是選填欄位，舊檔不受影響；要不要升版本號，開 change 時再決定
 
 ## Mermaid 轉換（2026-10-08 許願）
 
 - **匯出 Mermaid**：把目前的類別圖／循序圖輸出成 `classDiagram`／`sequenceDiagram` 文字，複製後可直接貼進 Markdown
 - **貼上 Mermaid 匯入**：貼上 Mermaid 文字，解析後建立對應的模型元素與圖
+  - 流程圖已完成（2026-10-22，`mermaid-flowchart-import`）；類別圖、循序圖待做
 - 注意：Mermaid 不存版面座標，匯入時需自動排版；匯出會遺失手動調整的位置
 - 建議先做匯出（模型 → 文字，單向、簡單），匯入（要寫 parser）另外排
 - 與流程圖／架構圖一起規劃：流程圖對應 Mermaid `flowchart`，架構圖可用 `flowchart` + subgraph（或 `architecture-beta`）；轉換層設計成「每種圖一個轉換器」，之後新增圖種時順便補上
+
+### 應用情境：將 Agent Skills 的建模成果帶進 Flow
+
+- AI 依照需求整理 Use Case，並產出 Mermaid 循序圖與類別圖。匯入 Flow 後，團隊可以編修圖面，再存成 `.uml.json`。
+- 可先用現有的「匯入 Mermaid」試貼以 `flowchart` 搭配 `subgraph` 表達的 Use Case 圖。Use Case 的文字說明可留在原本的 Markdown。
+- 若試用後有編修需求，可先用一個實際案例驗證循序圖匯入，確認參與者、訊息順序與中文註解能帶進 Flow，再評估類別圖匯入。
+- 參考：[Agent Skills 設計說明](https://github.com/wugelis/Custom_Agent_Lab6/blob/main/SKILLS_%E7%99%BC%E5%B1%95%E8%AA%AA%E6%98%8E.md)。
 
 ## 操作引導（2026-10-13 許願）
 
@@ -42,14 +44,25 @@
   - 之後若需要完整說明（快捷鍵總表），再加「?」按鈕
 - 流程圖提示列的預設文字沒寫「選形狀 → 點畫布放置」，可以一起補上
 
+## 瀏覽器自動暫存（2026-10-22 許願）
+
+- 自動暫存已完成（2026-10-23，`browser-autosave`），以下為延後項目
+- **記住上次開的檔案**：目前還原後沒有檔名，第一次存檔會要求選位置。`FileSystemFileHandle` 存不進 localStorage，要用 IndexedDB，重新開啟時瀏覽器會再要一次權限
+- **關閉分頁前立即寫入**：目前 debounce 1 秒，最後一秒的修改可能沒暫存；需要時加 `pagehide` 事件
+
+## Code Review（2026-10-23 許願）
+
+- **整體 code review**：目前程式碼大多沒有實際看過，需要完整檢視一次
+- 用 `antfu` skill 對照 Anthony Fu 的慣例（ESLint 設定、專案結構、寫法）來優化
+- 可搭配 `vue`、`pinia`、`vite` skill 檢查各自的用法
+- 建議分模組進行（`model/`、`store/`、`canvas/`、`ui/`、`io/`），每次一塊，邊看邊理解
+
 ## 其他
 
 - README 註明用 Chrome / Edge 開啟；VS Code 內建瀏覽器無法取得寫入權限，存檔會失敗
 
 ## 第一期刻意延後的功能（見 proposal）
 
-- 流程圖、架構圖
-- 循序圖 activation bar
-- Package、Note
+- 架構圖
 - Tauri 桌面包裝
 - 從程式碼反向產生類別圖

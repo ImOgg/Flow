@@ -1,7 +1,7 @@
 // 編輯器的暫時狀態：選取、工具、行內編輯。不進復原紀錄、不存檔
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import type { ClassifierKind, FlowShape, Id, RelationKind } from '../model/types'
+import { ref, shallowRef } from 'vue'
+import type { ClassifierKind, Clip, FlowShape, Id, RelationKind } from '../model/types'
 
 export type ClassTool = 'select' | ClassifierKind | RelationKind | 'note' | 'noteLink' | 'package'
 /** 流程圖工具：形狀 = 放置該形狀的節點；select 與類別圖共用 */
@@ -24,6 +24,9 @@ export const useEditorStore = defineStore('editor', () => {
   const operand = ref<{ fragmentId: Id; operand: number } | null>(null)
   const tool = ref<ClassTool | FlowTool>('select')
   const editing = ref<Editing | null>(null)
+  /** 程式內部剪貼簿；pasteCount 決定貼上偏移，複製時歸零 */
+  const clipboard = shallowRef<Clip | null>(null)
+  const pasteCount = ref(0)
 
   function select(id: Id | null, additive = false) {
     operand.value = null
@@ -39,5 +42,10 @@ export const useEditorStore = defineStore('editor', () => {
     editing.value = null
   }
 
-  return { activeDiagramId, selection, operand, tool, editing, select, clear }
+  function setClipboard(clip: Clip) {
+    clipboard.value = clip
+    pasteCount.value = 0
+  }
+
+  return { activeDiagramId, selection, operand, tool, editing, clipboard, pasteCount, select, clear, setClipboard }
 })

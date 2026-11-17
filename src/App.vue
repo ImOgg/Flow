@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, watch, watchEffect } from 'vue'
 import ClassDiagramView from './canvas/class/ClassDiagramView.vue'
 import FlowchartView from './canvas/flowchart/FlowchartView.vue'
 import SequenceDiagramView from './canvas/sequence/SequenceDiagramView.vue'
 import { isTyping } from './canvas/pointer'
+import { parseProject, serialize } from './model/serialize'
 import { useEditorStore } from './store/editor'
 import { useProjectStore } from './store/project'
 import DiagramTabs from './ui/DiagramTabs.vue'
@@ -14,6 +15,35 @@ import { useWorkspace } from './ui/workspace'
 const store = useProjectStore()
 const ed = useEditorStore()
 const ws = useWorkspace()
+
+const AUTOSAVE_KEY = 'flow:autosave'
+
+// 啟動時還原上次暫存（只是保險，正式來源仍是檔案）
+try {
+  const saved = localStorage.getItem(AUTOSAVE_KEY)
+  const r = saved ? parseProject(saved) : null
+  if (r?.ok) {
+    store.load(r.project)
+    store.dirty = true // 還原的內容不在任何檔案裡，新建或開檔前要先確認
+  }
+} catch {
+  // 讀不到或解析失敗就忽略暫存
+}
+
+// 內容有變更就暫存；開檔、新建也會觸發，所以暫存永遠等於目前畫面
+watch(
+  () => store.project,
+  (p, _, onCleanup) => {
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(AUTOSAVE_KEY, serialize(p))
+      } catch {
+        // 容量滿了或無痕模式，不影響編輯
+      }
+    }, 1000)
+    onCleanup(() => clearTimeout(t))
+  },
+)
 
 // 復原可能讓目前的圖消失，此時退回第一張
 const active = computed(
