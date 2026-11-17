@@ -23,6 +23,13 @@
 - 建議先做匯出（模型 → 文字，單向、簡單），匯入（要寫 parser）另外排
 - 與流程圖／架構圖一起規劃：流程圖對應 Mermaid `flowchart`，架構圖可用 `flowchart` + subgraph（或 `architecture-beta`）；轉換層設計成「每種圖一個轉換器」，之後新增圖種時順便補上
 
+### 應用情境：將 Agent Skills 的建模成果帶進 Flow
+
+- AI 依照需求整理 Use Case，並產出 Mermaid 循序圖與類別圖。匯入 Flow 後，團隊可以編修圖面，再存成 `.uml.json`。
+- 可先用現有的「匯入 Mermaid」試貼以 `flowchart` 搭配 `subgraph` 表達的 Use Case 圖。Use Case 的文字說明可留在原本的 Markdown。
+- 若試用後有編修需求，可先用一個實際案例驗證循序圖匯入，確認參與者、訊息順序與中文註解能帶進 Flow，再評估類別圖匯入。
+- 參考：[Agent Skills 設計說明](https://github.com/wugelis/Custom_Agent_Lab6/blob/main/SKILLS_%E7%99%BC%E5%B1%95%E8%AA%AA%E6%98%8E.md)。
+
 ## 操作引導（2026-10-13 許願）
 
 - **空白畫布引導**：圖還沒有內容時，在畫布中央顯示 3～4 行「怎麼開始」，放了第一個東西就自動消失
